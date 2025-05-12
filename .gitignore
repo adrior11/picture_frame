@@ -13,3 +13,7 @@
 
 # todo file
 TODO.md
+
+# backend
+.secret
+.db

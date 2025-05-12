@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
-use crate::db::PictureRepository;
+use crate::db::Repository;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pictures: Arc<PictureRepository>,
-    pub api_token: String,
+    pub repo: Arc<Repository>,
 }

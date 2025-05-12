@@ -1,5 +1,4 @@
-mod picture_dto;
+pub mod dto;
 mod picture_repository;
 
-pub use picture_dto::PictureDto;
-pub use picture_repository::PictureRepository;
+pub use picture_repository::Repository;

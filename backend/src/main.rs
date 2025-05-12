@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{
-    Router,
-    routing::{delete, get},
-};
+use axum::{Router, http};
 use r2d2_sqlite::SqliteConnectionManager;
 use tokio::net::TcpListener;
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use backend::{CONFIG, core::*, db::PictureRepository};
+use backend::{CONFIG, core::*, db::Repository};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,19 +20,32 @@ async fn main() -> Result<()> {
 
     let manager = SqliteConnectionManager::file(CONFIG.db_file.clone());
     let pool = r2d2::Pool::new(manager).unwrap();
-    let repo = PictureRepository::new(pool);
-    repo.init_schema()?; // Run migrations / create table
+    let repo = Repository::new(pool);
+    repo.init_schema()?;
 
     let state = AppState {
-        pictures: Arc::new(repo),
-        api_token: CONFIG.api_token.clone(),
+        repo: Arc::new(repo),
     };
 
     let router = Router::new()
-        .route("/api/ping", get(ping))
-        .route("/api/pictures", get(list_pictures).post(add_picture))
-        .route("/api/pictures/{id}", delete(delete_picture))
-        .with_state(state);
+        .merge(key_routes())
+        .merge(picture_routes())
+        .with_state(state)
+        .layer(
+            TraceLayer::new_for_http().make_span_with(|req: &http::Request<_>| {
+                tracing::info_span!(
+                    "http_request",
+                    method = %req.method(),
+                    uri = %req.uri(),
+                    client_ip = %req.headers().get("x-forwarded-for").and_then(|h| h.to_str().ok())
+                    .unwrap_or("unknown"),
+                    // status = field::Empty,
+                    // elapsed_ms = field::Empty,
+                )
+            })
+            .on_request(DefaultOnRequest::new().level(Level::INFO))
+            .on_response(DefaultOnResponse::new().level(Level::INFO).include_headers(true))
+        );
 
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     let listener_addr = listener.local_addr().unwrap().to_string();
