@@ -1,0 +1,15 @@
+# macOS-specific files
+.DS_Store
+
+# environment variables
+.env
+!.env.example
+
+# jetbrains setting folder
+.idea/
+
+# log files
+*/**.log
+
+# todo file
+TODO.md
