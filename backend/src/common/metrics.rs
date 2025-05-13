@@ -66,7 +66,6 @@ pub fn spawn_system_metrics(repo: Arc<Repository>) {
 
         loop {
             tick.tick().await;
-            tracing::debug!("Refreshing system metrics");
 
             sys.refresh_cpu_all();
             sys.refresh_memory();

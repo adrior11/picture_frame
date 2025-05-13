@@ -1,13 +1,9 @@
-#![allow(unused_imports)]
 use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{Router, extract::Request, middleware};
 use r2d2_sqlite::SqliteConnectionManager;
-use tokio::{
-    net::TcpListener,
-    signal::{self, unix::SignalKind},
-};
+use tokio::{net::TcpListener, sync::Notify};
 use tower_http::{
     limit::RequestBodyLimitLayer,
     trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
@@ -59,27 +55,43 @@ async fn main() -> Result<()> {
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024 /* 10MiB */));
     let metrics_router = metrics::prometheus_router();
 
+    metrics::spawn_system_metrics(state.repo.clone());
+
+    let shutdown_notify = Arc::new(Notify::new());
+    tokio::spawn(listen_for_shutdown(shutdown_notify.clone()));
+
     let api_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.backend_port)).await?;
     let metrics_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.prometheus_port)).await?;
+
     tracing::info!("⇢ API listening on: http://{}", api_listener.local_addr()?);
     tracing::info!(
         "⇢ Metrics listening on: http://{}/metrics",
         metrics_listener.local_addr()?
     );
+    let api_server = axum::serve(api_listener, api_router).with_graceful_shutdown({
+        let n = shutdown_notify.clone();
+        async move { n.notified().await }
+    });
+    let metrics_server = axum::serve(metrics_listener, metrics_router).with_graceful_shutdown({
+        let n = shutdown_notify.clone();
+        async move { n.notified().await }
+    });
 
-    // let shutdown = async {
-    //     signal::unix::signal(SignalKind::terminate())
-    //         .unwrap()
-    //         .recv()
-    //         .await;
-    // };
-
-    metrics::spawn_system_metrics(state.repo.clone());
-
-    let (_api_server, _metrics_server) = tokio::join!(
-        axum::serve(api_listener, api_router),
-        axum::serve(metrics_listener, metrics_router),
-    );
+    tokio::try_join!(api_server, metrics_server)?;
 
     Ok(())
+}
+
+#[cfg(unix)]
+async fn listen_for_shutdown(notify: Arc<Notify>) {
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = sigterm.recv() => {},
+    }
+
+    tracing::info!("shutdown signal received – starting graceful shutdown");
+    notify.notify_waiters();
 }
