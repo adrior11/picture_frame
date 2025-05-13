@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{Router, extract::Request};
+use axum::{Router, extract::Request, middleware};
 use r2d2_sqlite::SqliteConnectionManager;
-use tokio::{
-    net::TcpListener,
-    signal::{self, unix::SignalKind},
-};
+use tokio::net::TcpListener;
 use tower_http::{
     limit::RequestBodyLimitLayer,
     trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
@@ -14,7 +11,11 @@ use tower_http::{
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use backend::{CONFIG, api, common::AppState, db::Repository};
+use backend::{
+    CONFIG, api,
+    common::{AppState, metrics},
+    db::Repository,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -24,7 +25,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .init();
 
-    let manager = SqliteConnectionManager::file(CONFIG.db_file.clone());
+    let manager = SqliteConnectionManager::file(CONFIG.backend_db_file.clone());
     let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
     let repo = Repository::new(pool);
     repo.init_schema()?;
@@ -36,7 +37,8 @@ async fn main() -> Result<()> {
     let router = Router::new()
         .merge(api::key_routes())
         .merge(api::picture_routes())
-        .with_state(state)
+        .with_state(state.clone())
+        .route_layer(middleware::from_fn(metrics::track_metrics))
         .layer(
             TraceLayer::new_for_http().make_span_with(|req: &Request<_>| {
                 tracing::info_span!(
@@ -53,21 +55,26 @@ async fn main() -> Result<()> {
         )
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024 /* 10MB */));
 
-    let shutdown = async {
-        signal::unix::signal(SignalKind::terminate())
-            .unwrap()
-            .recv()
-            .await;
-    };
+    // let shutdown = async {
+    //     signal::unix::signal(SignalKind::terminate())
+    //         .unwrap()
+    //         .recv()
+    //         .await;
+    // };
 
-    let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
-    let listener_addr = listener.local_addr().unwrap().to_string();
-    tracing::info!("⇢ listening on http://{listener_addr}");
-
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown)
-        .await
-        .unwrap();
+    tokio::join!(start_main_server(router), metrics::start_metrics_server());
 
     Ok(())
+}
+
+async fn start_main_server(router: Router) {
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.backend_port))
+        .await
+        .unwrap();
+    let listener_addr = listener.local_addr().unwrap().to_string();
+    tracing::info!("⇢ listening on http://{listener_addr}");
+    axum::serve(listener, router)
+        // .with_graceful_shutdown(shutdown)
+        .await
+        .unwrap();
 }

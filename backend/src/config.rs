@@ -3,8 +3,10 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
-    pub data_dir: String,
-    pub db_file: String,
+    pub backend_port: String,
+    pub backend_data_dir: String,
+    pub backend_db_file: String,
+    pub prometheus_port: String,
 }
 
 pub static CONFIG: Lazy<Config> = Lazy::new(|| {

@@ -80,7 +80,7 @@ async fn upload_picture(
     let file_id = uuid::Uuid::new_v4().to_string();
     let filename = format!("{file_id}.{ext}");
 
-    let data_dir = std::path::Path::new(&CONFIG.data_dir);
+    let data_dir = std::path::Path::new(&CONFIG.backend_data_dir);
     if !data_dir.exists() {
         tokio::fs::create_dir_all(data_dir).await.map_err(|e| {
             tracing::error!("cannot create data_dir {data_dir:?}: {e}");
@@ -137,7 +137,7 @@ async fn delete_picture(
         return Err(StatusCode::NOT_FOUND);
     };
 
-    let path = std::path::Path::new(&CONFIG.data_dir).join(&fname);
+    let path = std::path::Path::new(&CONFIG.backend_data_dir).join(&fname);
     match tokio::fs::remove_file(&path).await {
         Ok(_) => tracing::debug!("removed file {}", path.display()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
