@@ -244,7 +244,10 @@ impl Repository {
         let salt = SaltString::generate(&mut OsRng);
         let hash = Argon2::default()
             .hash_password(secret.as_bytes(), &salt)
-            .map_err(|err| anyhow::anyhow!("Error hashing password: {}", err))?
+            .map_err(|err| {
+                tracing::warn!("Error hashing password: {:?}", err);
+                anyhow::anyhow!("Error hashing password: {}", err)
+            })?
             .to_string();
         Ok(hash)
     }

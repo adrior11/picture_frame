@@ -3,14 +3,18 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::{Router, extract::Request};
 use r2d2_sqlite::SqliteConnectionManager;
-use tokio::net::TcpListener;
-use tower_http::trace::{
-    DefaultOnEos, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer,
+use tokio::{
+    net::TcpListener,
+    signal::{self, unix::SignalKind},
+};
+use tower_http::{
+    limit::RequestBodyLimitLayer,
+    trace::{DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use backend::{CONFIG, core::*, db::Repository};
+use backend::{CONFIG, api, common::AppState, db::Repository};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,7 +25,7 @@ async fn main() -> Result<()> {
         .init();
 
     let manager = SqliteConnectionManager::file(CONFIG.db_file.clone());
-    let pool = r2d2::Pool::new(manager).unwrap();
+    let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
     let repo = Repository::new(pool);
     repo.init_schema()?;
 
@@ -30,8 +34,8 @@ async fn main() -> Result<()> {
     };
 
     let router = Router::new()
-        .merge(key_routes())
-        .merge(picture_routes())
+        .merge(api::key_routes())
+        .merge(api::picture_routes())
         .with_state(state)
         .layer(
             TraceLayer::new_for_http().make_span_with(|req: &Request<_>| {
@@ -46,14 +50,24 @@ async fn main() -> Result<()> {
             .on_request(DefaultOnRequest::new().level(Level::INFO))
             .on_response(DefaultOnResponse::new().level(Level::INFO).include_headers(true))
             .on_failure(DefaultOnFailure::new().level(Level::INFO))
-            .on_eos(DefaultOnEos::new().level(Level::INFO))
-        );
+        )
+        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024 /* 10MB */));
+
+    let shutdown = async {
+        signal::unix::signal(SignalKind::terminate())
+            .unwrap()
+            .recv()
+            .await;
+    };
 
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     let listener_addr = listener.local_addr().unwrap().to_string();
     tracing::info!("⇢ listening on http://{listener_addr}");
 
-    axum::serve(listener, router).await.unwrap();
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown)
+        .await
+        .unwrap();
 
     Ok(())
 }

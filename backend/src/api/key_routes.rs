@@ -5,9 +5,10 @@ use axum::{
     routing,
 };
 
-use crate::db::dto::{KeyCreateRequest, KeyInfo};
-
-use super::{auth::ApiKey, state::AppState};
+use crate::{
+    common::{ApiKey, AppState},
+    db::dto::{KeyCreateRequest, KeyInfo},
+};
 
 pub fn key_routes() -> Router<AppState> {
     Router::new()

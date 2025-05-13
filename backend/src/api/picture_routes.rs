@@ -9,9 +9,11 @@ use futures::StreamExt;
 use mime::{IMAGE_JPEG, IMAGE_PNG, Mime};
 use tokio::io::AsyncWriteExt;
 
-use crate::{CONFIG, db::dto::Picture};
-
-use super::{auth::ApiKey, state::AppState};
+use crate::{
+    CONFIG,
+    common::{ApiKey, AppState},
+    db::dto::Picture,
+};
 
 pub fn picture_routes() -> Router<AppState> {
     Router::new()
@@ -105,6 +107,7 @@ async fn upload_picture(
         }
     }
     dest.flush().await.ok(); // ignore flush error; already logged
+    dest.sync_all().await.ok();
 
     // DB row
     let saved = state.repo.add_picture(&filename).await.map_err(|e| {
