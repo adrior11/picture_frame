@@ -45,6 +45,16 @@ impl Repository {
         Ok(())
     }
 
+    pub async fn count_pictures(&self) -> anyhow::Result<usize> {
+        let pool = self.pool.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = pool.get()?;
+            let n: usize = conn.query_row("SELECT COUNT(*) FROM pictures", [], |r| r.get(0))?;
+            Ok(n)
+        })
+        .await?
+    }
+
     pub async fn list_pictures(&self) -> Result<Vec<Picture>> {
         let pool = self.pool.clone();
         task::spawn_blocking(move || {
