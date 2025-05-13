@@ -1,4 +1,3 @@
-// #![allow(dead_code, unused_imports, unused_variables)]
 use std::{future, sync::Arc, time::Duration};
 
 use axum::{
@@ -8,7 +7,6 @@ use axum::{
     response::IntoResponse,
     routing,
 };
-use metrics::gauge;
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use sysinfo::System;
 
@@ -61,32 +59,47 @@ pub async fn track_http(req: Request, next: Next) -> impl IntoResponse {
 
 /// Spawn a background job that refreshes host-level gauges.
 pub fn spawn_system_metrics(repo: Arc<Repository>) {
-    tracing::info!("Spawning system metrics");
     tokio::spawn(async move {
-        let mut sys = System::new(); // Keep one instance for accuracy
+        let mut sys = System::new();
         let mut tick =
             tokio::time::interval(Duration::from_secs(CONFIG.prometheus_refresh_interval));
 
-        let pictureframe_cpu_usage_percent = gauge!("pictureframe_cpu_usage_percent");
-        let pictureframe_memory_used_bytes = gauge!("pictureframe_memory_used_bytes");
-        let pictureframe_memory_total_bytes = gauge!("pictureframe_memory_total_bytes");
-        let pictureframe_image_count = gauge!("pictureframe_image_count");
-
         loop {
             tick.tick().await;
-
             tracing::debug!("Refreshing system metrics");
 
-            sys.refresh_cpu_usage();
+            sys.refresh_cpu_all();
             sys.refresh_memory();
 
-            pictureframe_cpu_usage_percent.set(sys.global_cpu_usage());
-            pictureframe_memory_used_bytes.set(sys.used_memory() as f64);
-            pictureframe_memory_total_bytes.set(sys.total_memory() as f64);
+            metrics::gauge!("pictureframe_cpu_usage_percent").set(sys.global_cpu_usage() as f64);
+            metrics::gauge!("pictureframe_memory_used_bytes").set(sys.used_memory() as f64);
+            metrics::gauge!("pictureframe_memory_total_bytes").set(sys.total_memory() as f64);
+
+            // Off-load directory walk to a blocking thread so we don't stall the async runtime
+            let data_dir = CONFIG.backend_data_dir.clone();
+            let dir_bytes = tokio::task::spawn_blocking(move || folder_size(&data_dir))
+                .await
+                .unwrap_or_else(|_| {
+                    tracing::error!("Failed to calculate directory size");
+                    0
+                });
+            metrics::gauge!("pictureframe_data_dir_used_bytes").set(dir_bytes as f64);
 
             if let Ok(n) = repo.count_pictures().await {
-                pictureframe_image_count.set(n as f64);
+                metrics::gauge!("pictureframe_image_count").set(n as f64);
             }
         }
     });
+}
+
+/// Recursively sum the sizes of all regular files under `path`.
+fn folder_size<P: AsRef<std::path::Path>>(path: P) -> u64 {
+    use walkdir::WalkDir;
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok()) // Skip unreadable entries
+        .filter_map(|e| e.metadata().ok()) // Skip if metadata fails
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
 }
