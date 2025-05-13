@@ -1,12 +1,15 @@
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Multipart, Path, State},
     http::StatusCode,
     response::IntoResponse,
     routing,
 };
+use futures::StreamExt;
+use mime::{IMAGE_JPEG, IMAGE_PNG, Mime};
+use tokio::io::AsyncWriteExt;
 
-use crate::db::dto::Picture;
+use crate::{CONFIG, db::dto::Picture};
 
 use super::{auth::ApiKey, state::AppState};
 
@@ -14,7 +17,7 @@ pub fn picture_routes() -> Router<AppState> {
     Router::new()
         .route(
             "/api/pictures",
-            routing::get(list_pictures).post(add_picture),
+            routing::get(list_pictures).post(upload_picture),
         )
         .route("/api/pictures/{id}", routing::delete(delete_picture))
 }
@@ -35,20 +38,80 @@ async fn list_pictures(
     Ok(Json(pics))
 }
 
-async fn add_picture(
+async fn upload_picture(
     ApiKey { scope, .. }: ApiKey,
     State(state): State<AppState>,
-    Json(dto): Json<Picture>, // NOTE: just the filename as of now
+    mut multipart: Multipart,
 ) -> Result<impl IntoResponse, StatusCode> {
     if scope != "rw" {
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let saved = state
-        .repo
-        .add_picture(&dto.filename)
+    let mut field = multipart
+        .next_field()
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::warn!("bad multipart: {e}");
+            StatusCode::BAD_REQUEST
+        })?
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    if field.name() != Some("file") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // MIME sniffing
+    let ct: Mime = field
+        .content_type()
+        .ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?
+        .parse()
+        .map_err(|_| StatusCode::UNSUPPORTED_MEDIA_TYPE)?;
+
+    let ext = if ct == IMAGE_JPEG {
+        "jpg"
+    } else if ct == IMAGE_PNG {
+        "png"
+    } else {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    };
+
+    let file_id = uuid::Uuid::new_v4().to_string();
+    let filename = format!("{file_id}.{ext}");
+
+    let data_dir = std::path::Path::new(&CONFIG.data_dir);
+    if !data_dir.exists() {
+        tokio::fs::create_dir_all(data_dir).await.map_err(|e| {
+            tracing::error!("cannot create data_dir {data_dir:?}: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    }
+    let path = data_dir.join(&filename);
+    tracing::debug!("📥 saving {}", path.display());
+
+    // Stream to disk
+    let mut dest = tokio::fs::File::create(&path).await.map_err(|e| {
+        tracing::error!("cannot open {path:?}: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    while let Some(chunk) = field.next().await {
+        let bytes = chunk.map_err(|e| {
+            tracing::warn!("multipart read error: {e}");
+            StatusCode::BAD_REQUEST
+        })?;
+        if let Err(e) = dest.write_all(&bytes).await {
+            tracing::error!("write error on {path:?}: {e}");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+    dest.flush().await.ok(); // ignore flush error; already logged
+
+    // DB row
+    let saved = state.repo.add_picture(&filename).await.map_err(|e| {
+        tracing::error!("db error: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
     Ok((StatusCode::CREATED, Json(saved)))
 }
 

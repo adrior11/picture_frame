@@ -15,5 +15,8 @@
 TODO.md
 
 # backend
-.secret
-.db
+*.secret
+*.db
+*/storage/
+*.png
+*.jpg
