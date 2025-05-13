@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{Router, http};
+use axum::{Router, extract::Request};
 use r2d2_sqlite::SqliteConnectionManager;
 use tokio::net::TcpListener;
-use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
+use tower_http::trace::{
+    DefaultOnEos, DefaultOnFailure, DefaultOnRequest, DefaultOnResponse, TraceLayer,
+};
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
@@ -32,19 +34,19 @@ async fn main() -> Result<()> {
         .merge(picture_routes())
         .with_state(state)
         .layer(
-            TraceLayer::new_for_http().make_span_with(|req: &http::Request<_>| {
+            TraceLayer::new_for_http().make_span_with(|req: &Request<_>| {
                 tracing::info_span!(
                     "http_request",
                     method = %req.method(),
                     uri = %req.uri(),
                     client_ip = %req.headers().get("x-forwarded-for").and_then(|h| h.to_str().ok())
                     .unwrap_or("unknown"),
-                    // status = field::Empty,
-                    // elapsed_ms = field::Empty,
                 )
             })
             .on_request(DefaultOnRequest::new().level(Level::INFO))
             .on_response(DefaultOnResponse::new().level(Level::INFO).include_headers(true))
+            .on_failure(DefaultOnFailure::new().level(Level::INFO))
+            .on_eos(DefaultOnEos::new().level(Level::INFO))
         );
 
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();

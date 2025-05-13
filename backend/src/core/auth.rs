@@ -8,6 +8,7 @@ use super::state::AppState;
 /// Injected into handlers after verification.
 #[derive(Clone)]
 pub struct ApiKey {
+    #[allow(dead_code)]
     pub id: String,
     pub scope: String, // 'ro' | 'rw'
 }

@@ -124,14 +124,27 @@ async fn delete_picture(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let deleted = state
+    let fname_opt = state
         .repo
-        .delete_picture(&id)
+        .delete_picture_and_return_filename(&id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if deleted {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(StatusCode::NOT_FOUND)
+
+    let Some(fname) = fname_opt else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let path = std::path::Path::new(&CONFIG.data_dir).join(&fname);
+    match tokio::fs::remove_file(&path).await {
+        Ok(_) => tracing::debug!("removed file {}", path.display()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::warn!("file already gone: {}", path.display())
+        }
+        Err(e) => {
+            tracing::error!("failed to delete {path:?}: {e}");
+            // DB row is already gone → still return 204
+        }
     }
+
+    Ok(StatusCode::NO_CONTENT)
 }

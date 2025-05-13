@@ -96,13 +96,24 @@ impl Repository {
         .await?
     }
 
-    pub async fn delete_picture(&self, id: &str) -> Result<bool> {
+    /// Returns the filename *and* deletes the DB row in one round-trip.
+    pub async fn delete_picture_and_return_filename(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<Option<String>> {
+        let id = id.to_owned();
         let pool = self.pool.clone();
-        let id = id.to_string();
-        task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let conn = pool.get()?;
-            let affected = conn.execute("DELETE FROM pictures WHERE id = ?1", params![id])?;
-            Ok(affected == 1)
+            let fname: Option<String> = conn
+                .query_row("SELECT filename FROM pictures WHERE id = ?1", [&id], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            if let Some(ref _f) = fname {
+                conn.execute("DELETE FROM pictures WHERE id = ?1", [&id])?;
+            }
+            Ok(fname)
         })
         .await?
     }
