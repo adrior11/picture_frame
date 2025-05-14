@@ -12,7 +12,7 @@ use tokio::io::AsyncWriteExt;
 use crate::{
     CONFIG,
     common::{ApiKey, AppState},
-    db::dto::Picture,
+    db::Picture,
 };
 
 pub fn picture_routes() -> Router<AppState> {
@@ -62,7 +62,6 @@ async fn upload_picture(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    // MIME sniffing
     let ct: Mime = field
         .content_type()
         .ok_or(StatusCode::UNSUPPORTED_MEDIA_TYPE)?
@@ -90,7 +89,6 @@ async fn upload_picture(
     let path = data_dir.join(&filename);
     tracing::debug!("📥 saving {}", path.display());
 
-    // Stream to disk
     let mut dest = tokio::fs::File::create(&path).await.map_err(|e| {
         tracing::error!("cannot open {path:?}: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
@@ -109,7 +107,6 @@ async fn upload_picture(
     dest.flush().await.ok(); // ignore flush error; already logged
     dest.sync_all().await.ok();
 
-    // DB row
     let saved = state.repo.add_picture(&filename).await.map_err(|e| {
         tracing::error!("db error: {e}");
         StatusCode::INTERNAL_SERVER_ERROR

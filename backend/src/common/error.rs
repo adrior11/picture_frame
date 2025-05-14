@@ -13,7 +13,7 @@ pub enum ApiError {
     #[error("bad request: {0}")]
     BadRequest(String),
     #[error(transparent)]
-    Internal(#[from] anyhow::Error), // Bubble up anything unexpected
+    Internal(#[from] anyhow::Error),
 }
 
 impl IntoResponse for ApiError {

@@ -21,7 +21,6 @@ where
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Parse header
         let token = parts
             .headers
             .get(header::AUTHORIZATION)
@@ -30,7 +29,6 @@ where
             .ok_or(StatusCode::UNAUTHORIZED)?
             .trim();
 
-        // Check against DB
         let st: AppState = AppState::from_ref(state);
         match st.repo.verify_api_key(token).await {
             Ok(Some((id, scope))) => Ok(ApiKey { id, scope }),

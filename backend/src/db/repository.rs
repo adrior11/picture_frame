@@ -3,15 +3,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use argon2::{
     Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+    password_hash::{PasswordHash, PasswordVerifier},
 };
-use password_hash::rand_core::RngCore;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{OptionalExtension, params};
 use tokio::task;
 
-use super::dto::{KeyInfo, Picture};
+use super::Picture;
 
 pub struct Repository {
     pool: Arc<Pool<SqliteConnectionManager>>,
@@ -156,70 +155,6 @@ impl Repository {
 }
 
 impl Repository {
-    pub async fn create_api_key_and_return_secret(
-        &self,
-        id: &str,
-        scope: &str,
-    ) -> anyhow::Result<String> {
-        // Generate random 32-byte secret
-        let mut raw = [0u8; 32];
-        OsRng.try_fill_bytes(&mut raw)?;
-        let secret = hex::encode(raw);
-
-        self.create_api_key(id, scope, &secret).await?;
-        Ok(secret)
-    }
-
-    pub async fn list_api_keys(&self) -> anyhow::Result<Vec<KeyInfo>> {
-        let pool = self.pool.clone();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let mut stmt =
-                conn.prepare("SELECT id, scope, created_at FROM api_keys ORDER BY created_at")?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(KeyInfo {
-                        id: r.get(0)?,
-                        scope: r.get(1)?,
-                        created: r.get(2)?,
-                    })
-                })?
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(rows)
-        })
-        .await?
-    }
-
-    pub async fn delete_api_key(&self, id: &str) -> anyhow::Result<bool> {
-        let pool = self.pool.clone();
-        let id = id.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            let n = conn.execute("DELETE FROM api_keys WHERE id = ?1", params![id])?;
-            Ok(n == 1)
-        })
-        .await?
-    }
-}
-
-impl Repository {
-    pub async fn create_api_key(&self, id: &str, scope: &str, secret: &str) -> Result<()> {
-        let hash = Self::hash_secret(secret)?;
-        let id = id.to_owned();
-        let scope = scope.to_owned();
-        let pool = self.pool.clone();
-        task::spawn_blocking(move || {
-            let conn = pool.get()?;
-            conn.execute(
-                "INSERT INTO api_keys (id, token_hash, scope, created_at)
-                 VALUES (?1, ?2, ?3, strftime('%s','now'))",
-                params![id, hash, scope],
-            )?;
-            Ok(())
-        })
-        .await?
-    }
-
     pub async fn verify_api_key(
         &self,
         secret: &str,
@@ -248,18 +183,6 @@ impl Repository {
             Ok(None)
         })
         .await?
-    }
-
-    fn hash_secret(secret: &str) -> Result<String> {
-        let salt = SaltString::generate(&mut OsRng);
-        let hash = Argon2::default()
-            .hash_password(secret.as_bytes(), &salt)
-            .map_err(|err| {
-                tracing::warn!("Error hashing password: {:?}", err);
-                anyhow::anyhow!("Error hashing password: {}", err)
-            })?
-            .to_string();
-        Ok(hash)
     }
 
     fn verify_secret(secret: &str, hash: &str) -> bool {

@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 use backend::{
     CONFIG, api,
     common::{AppState, metrics},
-    db::Repository,
+    db::{Repository, SharedSettings},
 };
 
 #[tokio::main]
@@ -25,17 +25,19 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .init();
 
+    let shared_settings = SharedSettings::load().unwrap();
     let manager = SqliteConnectionManager::file(CONFIG.backend_db_file.clone());
     let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
     let repo = Repository::new(pool);
     repo.init_schema()?;
     let state = AppState {
         repo: Arc::new(repo),
+        settings: shared_settings.clone(),
     };
 
     let api_router = Router::new()
-        .merge(api::key_routes())
         .merge(api::picture_routes())
+        .merge(api::settings_routes())
         .with_state(state.clone())
         .route_layer(middleware::from_fn(metrics::track_http))
         .layer(
