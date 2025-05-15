@@ -62,6 +62,15 @@ async fn main() -> Result<()> {
     let shutdown_notify = Arc::new(Notify::new());
     tokio::spawn(listen_for_shutdown(shutdown_notify.clone()));
 
+    // let cert_path = &CONFIG.backend_tls_cert_file;
+    // let key_path = &CONFIG.backend_tls_key_file;
+    // let tls = RustlsConfig::from_pem_file(cert_path, key_path)
+    //     .await
+    //     .unwrap();
+
+    // let api_addr = SocketAddr::from(([0, 0, 0, 0], CONFIG.backend_port));
+    // let api_server = axum_server::bind_rustls(api_addr, tls).serve(api_router.into_make_service());
+
     let api_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.backend_port)).await?;
     let metrics_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.prometheus_port)).await?;
 
@@ -70,6 +79,7 @@ async fn main() -> Result<()> {
         "⇢ Metrics listening on: http://{}/metrics",
         metrics_listener.local_addr()?
     );
+
     let api_server = axum::serve(api_listener, api_router).with_graceful_shutdown({
         let n = shutdown_notify.clone();
         async move { n.notified().await }

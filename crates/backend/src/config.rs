@@ -3,10 +3,12 @@ use serde::Deserialize;
 
 #[derive(Deserialize, Clone)]
 pub struct Config {
-    pub backend_port: String,
+    pub backend_port: u16,
     pub backend_data_dir: String,
     pub backend_db_file: String,
     pub backend_frame_settings_file: String,
+    pub backend_tls_cert_file: String,
+    pub backend_tls_key_file: String,
     pub prometheus_port: String,
     pub prometheus_refresh_interval: u64,
 }

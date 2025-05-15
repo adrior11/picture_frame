@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = [ 
+    "backend",
+    # "display",
+    "hash_once",
+    # "libs",
+]
