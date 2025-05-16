@@ -11,7 +11,7 @@ use tower_http::{
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
-use libs::frame_settings::SharedSettings;
+use libs::{frame_settings::SharedSettings, util};
 
 use backend::{
     CONFIG, api,
@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
     metrics::spawn_system_metrics(state.repo.clone());
 
     let shutdown_notify = Arc::new(Notify::new());
-    tokio::spawn(listen_for_shutdown(shutdown_notify.clone()));
+    tokio::spawn(util::listen_for_shutdown(shutdown_notify.clone()));
 
     // let cert_path = &CONFIG.backend_tls_cert_file;
     // let key_path = &CONFIG.backend_tls_key_file;
@@ -94,18 +94,4 @@ async fn main() -> Result<()> {
     tokio::try_join!(api_server, metrics_server)?;
 
     Ok(())
-}
-
-#[cfg(unix)]
-async fn listen_for_shutdown(notify: Arc<Notify>) {
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("failed to install SIGTERM handler");
-
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {},
-        _ = sigterm.recv() => {},
-    }
-
-    tracing::info!("shutdown signal received – starting graceful shutdown");
-    notify.notify_waiters();
 }

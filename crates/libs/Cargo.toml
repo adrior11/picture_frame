@@ -12,3 +12,4 @@ crate-type = ["lib"]
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.45.0", features = ["full"] }
 toml = "0.8.22"
+tracing = "0.1.41"

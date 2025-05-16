@@ -1,9 +1,9 @@
-// TODO: graceful shutdown
 mod config;
 
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
     time::Duration,
 };
 
@@ -12,10 +12,16 @@ use image::GenericImageView;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rand::seq::SliceRandom;
 use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum, rect::Rect};
-use tokio::{sync::watch, time::Instant};
+use tokio::{
+    sync::{Notify, watch},
+    time::Instant,
+};
 use tracing_subscriber::EnvFilter;
 
-use libs::frame_settings::{FrameSettings, SharedSettings};
+use libs::{
+    frame_settings::{FrameSettings, SharedSettings},
+    util,
+};
 
 use config::CONFIG;
 
@@ -130,8 +136,15 @@ async fn main() -> Result<()> {
 
     let mut next_switch = Instant::now();
 
+    let shutdown = Arc::new(Notify::new());
+    tokio::spawn(util::listen_for_shutdown(shutdown.clone()));
+
     loop {
         tokio::select! {
+            _ = shutdown.notified() => {
+                return Ok(());
+            }
+
             _ = rx.changed() => {
                 current = rx.borrow().clone();
                 tracing::info!(?current, "settings updated via channel");
@@ -189,10 +202,8 @@ async fn main() -> Result<()> {
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => return Ok(()),
-                Event::MouseButtonDown { .. } => {
-                    // BUG: this freezes the screen
-                    // next_switch = Instant::now();
+                } => {
+                    return Ok(());
                 }
                 _ => {}
             }
