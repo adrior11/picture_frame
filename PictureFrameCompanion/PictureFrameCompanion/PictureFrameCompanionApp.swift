@@ -12,7 +12,7 @@ import SwiftUI
 struct PictureFrameCompanionApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
-            Token.self
+            Connection.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

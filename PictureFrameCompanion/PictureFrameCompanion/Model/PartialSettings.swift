@@ -7,7 +7,7 @@
 
 import Foundation
 
-/// For PATCH /api/settings (only send the fields you changed)
+/// For PATCH /api/settings
 struct PartialSettings: Codable {
     var display_enabled: Bool?
     var rotate_enabled: Bool?

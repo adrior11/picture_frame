@@ -11,24 +11,32 @@ import os
 
 @MainActor
 final class ApiClient: ObservableObject {
-    private let logger = Logger(subsystem: "PicFrameCompanion", category: "api")
-    private let baseURL: URL
-    private let token: () -> String
+    private let logger = Logger(subsystem: "PictureFrameCompanion", category: "api")
+    private var token: () -> String
+
+    @Published private(set) var reachable = false
+    @Published var pictures: [Picture] = []
+    @Published var settings: FrameSettings?
+    @Published var busy = false
+    @Published var error: String?
+    @Published var baseURL: URL
+
+    var isConfigured: Bool {
+        !(baseURL.host ?? "").isEmpty && !token().isEmpty
+    }
+
+    // MARK: - Init & Update
 
     init(baseURL: URL, tokenProvider: @escaping () -> String) {
         self.baseURL = baseURL
         self.token = tokenProvider
     }
 
-    // MARK: - Published state
+    func update(url: URL, tokenProvider: @escaping () -> String) {
+        self.baseURL = url
+        self.token = tokenProvider
+    }
 
-    @Published private(set) var reachable = false
-    
-    @Published var pictures: [Picture] = []
-    @Published var settings: FrameSettings?
-    @Published var busy = false
-    @Published var error: String?
-    
     // MARK: - Pictures
 
     /// GET /api/pictures
@@ -113,10 +121,10 @@ final class ApiClient: ObservableObject {
     }
 
     // MARK: - Private helpers
-    
+
     private let session: URLSession = {
         let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest  = 5
+        cfg.timeoutIntervalForRequest = 5
         cfg.timeoutIntervalForResource = 5
         return URLSession(configuration: cfg)
     }()
@@ -153,7 +161,9 @@ final class ApiClient: ObservableObject {
                 self.pictures = []
                 self.settings = nil
                 self.error = message(for: urlErr)
-                logger.error("URLError \(urlErr.code.rawValue): \(urlErr.localizedDescription, privacy: .public)")
+                logger.error(
+                    "URLError \(urlErr.code.rawValue): \(urlErr.localizedDescription, privacy: .public)"
+                )
             } else {
                 self.error = errorText(error)
                 logger.error("API error: \(error.localizedDescription, privacy: .public)")

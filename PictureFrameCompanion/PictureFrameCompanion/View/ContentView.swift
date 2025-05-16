@@ -13,7 +13,7 @@ import os
 
 struct ContentView: View {
     @Environment(\.modelContext) private var ctx
-    @Query private var tokens: [Token]
+    @Query private var conns: [Connection]
 
     @StateObject private var api: ApiClient
     @State private var pickerItem: PhotosPickerItem?
@@ -26,11 +26,13 @@ struct ContentView: View {
 
     init() {
         let saved =
-            (try? ModelContext(.init(for: Token.self))
-            .fetch(FetchDescriptor<Token>()).first)?
-            .bearerToken ?? ""
-        let url = URL(string: Config.BASE_API_URL.rawValue)!
-        _api = StateObject(wrappedValue: ApiClient(baseURL: url) { saved })
+            (try? ModelContext(.init(for: Connection.self))
+                .fetch(FetchDescriptor<Connection>()).first) ?? Connection()
+
+        let url =
+            URL(string: saved.baseURL)
+            ?? URL(string: "about:blank")!
+        _api = StateObject(wrappedValue: ApiClient(baseURL: url) { saved.bearerToken })
     }
 
     // MARK: - Body
@@ -42,7 +44,12 @@ struct ContentView: View {
                     toolbarLeadingItems
                     toolbarTrailingItems
                 }
-                .task { await loadAll() }
+                .task {
+                    guard api.isConfigured else {
+                        return
+                    }
+                    await loadAll()
+                }
                 .onChange(of: pickerItem) {
                     Task {
                         await upload()
@@ -55,8 +62,9 @@ struct ContentView: View {
                 SettingsView(settings: api.settings ?? defaultSettings()) { patch in
                     Task { await api.patchSettings(patch) }
                 }
-            case .token:
-                TokenView(token: existingToken())
+            case .connection:
+                ConnectionView(conn: existingConn())
+                    .onDisappear { applyConnectionChanges() }
             }
         }
         .alert(
@@ -112,10 +120,12 @@ struct ContentView: View {
             ) {
                 Image(systemName: "plus")
             }
-            .disabled(tokens.first?.bearerToken.isEmpty ?? true || api.busy || !api.reachable)
+            .disabled(
+                conns.first?.bearerToken.isEmpty ?? true || conns.first?.baseURL.isEmpty ?? true
+                    || api.busy || !api.reachable)
 
             Button {
-                activeSheet = .token
+                activeSheet = .connection
             } label: {
                 Image(systemName: "key.fill")
             }
@@ -151,11 +161,20 @@ struct ContentView: View {
         pickerItem = nil
     }
 
+    private func applyConnectionChanges() {
+        guard let c = conns.first,
+            let newURL = URL(string: c.baseURL),
+            !c.baseURL.isEmpty
+        else { return }
+
+        api.update(url: newURL) { c.bearerToken }
+    }
+
     // MARK: - Helpers
 
-    private func existingToken() -> Token {
-        if let t = tokens.first { return t }
-        let fresh = Token()
+    private func existingConn() -> Connection {
+        if let c = conns.first { return c }
+        let fresh = Connection()
         ctx.insert(fresh)
         return fresh
     }
@@ -173,7 +192,7 @@ struct ContentView: View {
 // MARK: - Supporting types
 
 private enum SheetType: Identifiable {
-    case settings, token
+    case settings, connection
     var id: Int { hashValue }
 }
 
@@ -204,5 +223,5 @@ private struct PictureRow: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: Token.self, inMemory: true)
+        .modelContainer(for: Connection.self, inMemory: true)
 }

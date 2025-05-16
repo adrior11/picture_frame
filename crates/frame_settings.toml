@@ -1,4 +1,4 @@
 display_enabled = true
 rotate_enabled = true
-rotate_interval_secs = 12
+rotate_interval_secs = 2
 shuffle = true
