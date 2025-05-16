@@ -72,7 +72,6 @@ pub fn spawn_system_metrics(repo: Arc<Repository>) {
 
             metrics::gauge!("pictureframe_cpu_usage_percent").set(sys.global_cpu_usage() as f64);
             metrics::gauge!("pictureframe_memory_used_bytes").set(sys.used_memory() as f64);
-            metrics::gauge!("pictureframe_memory_total_bytes").set(sys.total_memory() as f64);
 
             // Off-load directory walk to a blocking thread so we don't stall the async runtime
             let data_dir = CONFIG.backend_data_dir.clone();
