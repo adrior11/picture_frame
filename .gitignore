@@ -23,9 +23,15 @@ TODO.md
 *.jpg
 http-client/
 
+# Cargo
+**/debug/
+**/target/
+**/*.rs.bk
+*.pdb
+
 # Xcode 
-xcuserdata/
-*.xcuserstate
+**/xcuserdata/
+*/**.xcuserstate
 
 **/*.xcodeproj/project.xcworkspace/*
 !**/*.xcodeproj/project.xcworkspace/xcshareddata
