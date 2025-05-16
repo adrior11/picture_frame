@@ -1,7 +1,9 @@
 use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use serde::Deserialize;
 
-use crate::{common::AppState, db::FrameSettings};
+use libs::frame_settings::FrameSettings;
+
+use crate::common::AppState;
 
 #[derive(Deserialize)]
 pub struct PartialSettings {

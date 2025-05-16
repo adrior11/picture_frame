@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::db::{Repository, SharedSettings};
+use libs::frame_settings::SharedSettings;
+
+use crate::db::Repository;
 
 #[derive(Clone)]
 pub struct AppState {

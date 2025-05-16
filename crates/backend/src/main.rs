@@ -11,10 +11,12 @@ use tower_http::{
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
 
+use libs::frame_settings::SharedSettings;
+
 use backend::{
     CONFIG, api,
     common::{AppState, metrics},
-    db::{Repository, SharedSettings},
+    db::Repository,
 };
 
 #[tokio::main]
@@ -25,7 +27,7 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .init();
 
-    let shared_settings = SharedSettings::load().unwrap();
+    let shared_settings = SharedSettings::load(&CONFIG.backend_frame_settings_file).unwrap();
     let manager = SqliteConnectionManager::file(CONFIG.backend_db_file.clone());
     let pool = r2d2::Pool::builder().max_size(4).build(manager).unwrap();
     let repo = Repository::new(pool);
