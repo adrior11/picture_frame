@@ -2,7 +2,7 @@
 resolver = "2"
 members = [ 
     "backend",
-    # "display",
+    "display",
     "hash_once",
-    # "libs",
+    "libs",
 ]
