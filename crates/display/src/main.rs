@@ -1,3 +1,4 @@
+// TODO: graceful shutdown
 mod config;
 
 use std::{
@@ -12,6 +13,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rand::seq::SliceRandom;
 use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum, rect::Rect};
 use tokio::{sync::watch, time::Instant};
+use tracing_subscriber::EnvFilter;
 
 use libs::frame_settings::{FrameSettings, SharedSettings};
 
@@ -76,9 +78,17 @@ fn show_image(
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
+        .init();
+
     let settings = SharedSettings::load(&CONFIG.backend_frame_settings_file)?;
+    let settings_path = std::fs::canonicalize(&CONFIG.backend_frame_settings_file)
+        .context("canonicalising BACKEND_FRAME_SETTINGS_FILE")?;
+
     let mut rx: watch::Receiver<FrameSettings> = settings.subscribe();
     let mut current = rx.borrow().clone();
+    tracing::info!(?current, "initial settings");
 
     let data_dir = PathBuf::from(&CONFIG.backend_data_dir);
     let mut images = scan_images(&data_dir);
@@ -86,21 +96,21 @@ async fn main() -> Result<()> {
         images.shuffle(&mut rand::rng())
     }
     let mut index: usize = 0;
+    tracing::info!(count = images.len(), "initial image scan");
 
-    // BUG: This does not react, on settings change.
-    let (mut _inotify, mut watcher_rx) = {
-        let (tx, rx) = tokio::sync::mpsc::channel(8);
-        let watcher_config = notify::Config::default()
-            .with_poll_interval(Duration::from_secs(2))
-            .with_compare_contents(true);
+    let (_watcher, mut watcher_rx) = {
+        let (tx, rx) = tokio::sync::mpsc::channel::<notify::Result<notify::Event>>(8);
         let mut w: RecommendedWatcher = Watcher::new(
             move |res| {
                 let _ = tx.blocking_send(res);
             },
-            watcher_config,
+            notify::Config::default()
+                .with_poll_interval(Duration::from_secs(5))
+                .with_compare_contents(true),
         )
         .unwrap();
         w.watch(&data_dir, RecursiveMode::NonRecursive)?;
+        w.watch(&settings_path, RecursiveMode::NonRecursive)?;
         (w, rx)
     };
 
@@ -114,16 +124,17 @@ async fn main() -> Result<()> {
         .unwrap();
     window.set_bordered(false);
 
+    let mut event_pump = sdl_context.event_pump().unwrap();
     let mut canvas = window.into_canvas().present_vsync().build().unwrap();
     let tex_creator = canvas.texture_creator();
 
     let mut next_switch = Instant::now();
-    let mut event_pump = sdl_context.event_pump().unwrap();
 
     loop {
         tokio::select! {
             _ = rx.changed() => {
                 current = rx.borrow().clone();
+                tracing::info!(?current, "settings updated via channel");
                 next_switch = Instant::now();
                 if current.shuffle {
                     images.shuffle(&mut rand::rng());
@@ -131,19 +142,38 @@ async fn main() -> Result<()> {
                 }
             }
 
-            Some(_) = watcher_rx.recv() => {
-                images = scan_images(&data_dir);
-                if current.shuffle {
-                    images.shuffle(&mut rand::rng());
+            Some(Ok(ev)) = watcher_rx.recv() => {
+                tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
+                let affects_settings =
+                    ev.paths.iter().any(|p| std::fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
+                if affects_settings {
+                    if let Ok(toml) = fs::read_to_string(&settings_path) {
+                        if let Ok(new) = toml::from_str::<FrameSettings>(&toml) {
+                            // broadcast only if value changed
+                            if new != *settings.settings_store.inner.read().await {
+                                tracing::info!(?new, "reloaded settings.toml");
+                                *settings.settings_store.inner.write().await = new.clone();
+                                let _ = settings.settings_store.tx.send(new.clone());
+                                current = new;
+                                next_switch = Instant::now();
+                            }
+                        } else {
+                            tracing::warn!("TOML parse error");
+                        }
+                    }
+                } else {
+                    images = scan_images(&data_dir);
+                    tracing::info!(count = images.len(), "image folder rescan");
+                    if current.shuffle { images.shuffle(&mut rand::rng()); }
+                    index = 0;
                 }
-                index = 0.min(index);
             }
 
             _ = tokio::time::sleep_until(next_switch), if current.display_enabled => {
                 if !images.is_empty() {
                     let img = &images[index % images.len()];
                     if let Err(e) = show_image(&mut canvas, &tex_creator, img) {
-                        eprintln!("display error: {e:#}");
+                        tracing::error!("display error: {e:#}");
                     }
                     if current.rotate_enabled {
                         index = (index + 1) % images.len();
@@ -169,7 +199,6 @@ async fn main() -> Result<()> {
         }
 
         if !current.display_enabled {
-            // NOTE: blank screen
             canvas.set_draw_color(sdl2::pixels::Color::BLACK);
             canvas.clear();
             canvas.present();

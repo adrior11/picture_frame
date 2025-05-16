@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{fs, io, path::PathBuf, sync::Arc};
 use tokio::sync::{watch, RwLock};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrameSettings {
     pub display_enabled: bool,
     pub rotate_enabled: bool,
@@ -11,8 +11,8 @@ pub struct FrameSettings {
 }
 
 pub struct SettingsStore {
-    inner: RwLock<FrameSettings>,
-    tx: watch::Sender<FrameSettings>,
+    pub inner: RwLock<FrameSettings>,
+    pub tx: watch::Sender<FrameSettings>,
 }
 
 #[derive(Clone)]

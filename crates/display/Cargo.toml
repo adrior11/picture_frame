@@ -22,3 +22,5 @@ sdl2 = { version = "0.37.0", features = ["ttf"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.45.0", features = ["full"] }
 toml = "0.8.22"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
