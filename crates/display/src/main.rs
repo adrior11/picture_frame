@@ -11,7 +11,12 @@ use anyhow::{Context, Result};
 use image::GenericImageView;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use rand::seq::SliceRandom;
-use sdl2::{event::Event, keyboard::Keycode, pixels::PixelFormatEnum, rect::Rect};
+use sdl2::{
+    event::Event,
+    keyboard::Keycode,
+    pixels::{Color, PixelFormatEnum},
+    rect::Rect,
+};
 use tokio::{
     sync::{Notify, watch},
     time::Instant,
@@ -25,7 +30,7 @@ use libs::{
 
 use config::CONFIG;
 
-// Gather all *.jpg *.png under the given dir.
+/// Collect all *.jpg / *.png files in a directory (non‑recursive).
 fn scan_images(dir: &Path) -> Vec<PathBuf> {
     let mut files: Vec<_> = fs::read_dir(dir)
         .unwrap_or_else(|_| panic!("cannot read {:?}", dir))
@@ -47,7 +52,7 @@ fn scan_images(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Load an image and blit it to the full-screen canvas (keeping aspect).
+/// Load an image and blit it full‑screen (keep aspect).
 fn show_image(
     canvas: &mut sdl2::render::Canvas<sdl2::video::Window>,
     tex_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
@@ -99,7 +104,7 @@ async fn main() -> Result<()> {
     let data_dir = PathBuf::from(&CONFIG.backend_data_dir);
     let mut images = scan_images(&data_dir);
     if current.shuffle {
-        images.shuffle(&mut rand::rng())
+        images.shuffle(&mut rand::rng());
     }
     let mut index: usize = 0;
     tracing::info!(count = images.len(), "initial image scan");
@@ -113,8 +118,7 @@ async fn main() -> Result<()> {
             notify::Config::default()
                 .with_poll_interval(Duration::from_secs(5))
                 .with_compare_contents(true),
-        )
-        .unwrap();
+        )?;
         w.watch(&data_dir, RecursiveMode::NonRecursive)?;
         w.watch(&settings_path, RecursiveMode::NonRecursive)?;
         (w, rx)
@@ -123,7 +127,7 @@ async fn main() -> Result<()> {
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
     let mut window = video_subsystem
-        .window("Test", 800, 480)
+        .window("Picture Frame", 800, 480)
         .position_centered()
         .fullscreen_desktop()
         .build()
@@ -141,13 +145,11 @@ async fn main() -> Result<()> {
 
     loop {
         tokio::select! {
-            _ = shutdown.notified() => {
-                return Ok(());
-            }
+            _ = shutdown.notified() => return Ok(()),
 
             _ = rx.changed() => {
                 current = rx.borrow().clone();
-                tracing::info!(?current, "settings updated via channel");
+                tracing::debug!(?current, "settings updated via channel");
                 next_switch = Instant::now();
                 if current.shuffle {
                     images.shuffle(&mut rand::rng());
@@ -157,14 +159,13 @@ async fn main() -> Result<()> {
 
             Some(Ok(ev)) = watcher_rx.recv() => {
                 tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
-                let affects_settings =
-                    ev.paths.iter().any(|p| std::fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
+                let affects_settings = ev.paths.iter().any(|p| std::fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
                 if affects_settings {
                     if let Ok(toml) = fs::read_to_string(&settings_path) {
                         if let Ok(new) = toml::from_str::<FrameSettings>(&toml) {
                             // broadcast only if value changed
                             if new != *settings.settings_store.inner.read().await {
-                                tracing::info!(?new, "reloaded settings.toml");
+                                tracing::debug!(?new, "reloaded settings.toml");
                                 *settings.settings_store.inner.write().await = new.clone();
                                 let _ = settings.settings_store.tx.send(new.clone());
                                 current = new;
@@ -176,7 +177,7 @@ async fn main() -> Result<()> {
                     }
                 } else {
                     images = scan_images(&data_dir);
-                    tracing::info!(count = images.len(), "image folder rescan");
+                    tracing::debug!(count = images.len(), "image folder rescan");
                     if current.shuffle { images.shuffle(&mut rand::rng()); }
                     index = 0;
                 }
@@ -202,15 +203,13 @@ async fn main() -> Result<()> {
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => {
-                    return Ok(());
-                }
+                } => return Ok(()),
                 _ => {}
             }
         }
 
         if !current.display_enabled {
-            canvas.set_draw_color(sdl2::pixels::Color::BLACK);
+            canvas.set_draw_color(Color::BLACK);
             canvas.clear();
             canvas.present();
             tokio::time::sleep(Duration::from_millis(200)).await;

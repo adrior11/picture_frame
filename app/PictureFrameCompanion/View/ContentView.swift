@@ -140,6 +140,7 @@ struct ContentView: View {
         guard api.reachable else { return }
         await api.fetchSettings()
     }
+    
     private func upload() async {
         guard let item = pickerItem else { return }
 
