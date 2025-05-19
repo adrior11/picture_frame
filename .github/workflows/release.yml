@@ -2,43 +2,43 @@ name: release
 
 on:
   workflow_dispatch:
-  
+
 jobs:
   release:
-    name: Release ${{ matrix.crate }} – ${{ matrix.platform.os-name }}
-    runs-on: ${{ matrix.platform.runs-on }}
-    
+    name: Release ${{ matrix.crate }} – ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+
     strategy:
       fail-fast: false
       matrix:
         crate: [ backend, display, hash_once ]
         platform: [ Linux-aarch64, macOS-x86_64 ]
-        
+
         include:
-          - os-name: Linux-aarch64
+          - platform: Linux-aarch64
             runs-on: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
 
-          - os-name: macOS-x86_64
+          - platform: macOS-x86_64
             runs-on: macOS-latest
             target: x86_64-apple-darwin
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        
-      - name: Build ${{ matrix.crate }} for ${{ matrix.platform.target }}
+
+      - name: Build ${{ matrix.crate }} for ${{ matrix.target }}
         uses: houseabsolute/actions-rust-cross@v1
         with:
           command: build
           working-directory: crates/${{ matrix.crate }}
-          target: ${{ matrix.platform.target }}
+          target: ${{ matrix.target }}
           args: "--locked --release"
           strip: true
-          
+
       - name: Publish ${{ matrix.crate }} to GitHub Release
         uses: houseabsolute/actions-rust-release@v0
         with:
           executable-name: ${{ matrix.crate }}
           working-directory: crates/${{ matrix.crate }}
-          target: ${{ matrix.platform.target }}
+          target: ${{ matrix.target }}
