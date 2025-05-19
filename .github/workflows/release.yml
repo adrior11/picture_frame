@@ -36,10 +36,30 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Cache apt dependencies
+        uses: "actions/cache@v4"
+        with:
+          path: /var/lib/apt/lists
+          key: ${{ runner.os }}-apt-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-apt-
+
+      - name: Install cross-compilation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Install SDL2 dependencies
+        if: inputs.crate == 'display'
+        run: |
+          sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu `lsb_release -sc` main universe restricted multiverse"
+          sudo apt-get update -y -qq
+          sudo apt-get install -y --no-install-recommends libasound2-dev
+
       - name: "Install Rust"
         uses: "actions-rs/toolchain@v1"
         with:
           toolchain: "stable"
+          target: aarch64-unknown-linux-gnu
 
       - name: "Cache cargo"
         uses: "actions/cache@v4"
@@ -54,26 +74,16 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Cache SDL2 dependencies
-        if: inputs.crate == 'display'
-        uses: "actions/cache@v4"
-        with:
-          path: /var/lib/apt/lists
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-apt-
-
-      - name: Install SDL2 dependencies
-        if: inputs.crate == 'display'
-        run: |
-          sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu `lsb_release -sc` main universe restricted multiverse"
-          sudo apt-get update -y -qq
-          sudo apt-get install -y --no-install-recommends libsdl2-dev
-
       - name: Build ${{ inputs.crate }}
         run: |
-          cargo build --locked --release --manifest-path crates/${{ inputs.crate }}/Cargo.toml ${{ inputs.crate == 'display' && '--features=sdl2/bundled' || '' }}
-          cp crates/target/release/${{ inputs.crate }} ./${{ inputs.crate }}
-          strip -s ./${{ inputs.crate }}
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          export PKG_CONFIG_ALLOW_CROSS=1
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
+          cargo build --locked --release --target aarch64-unknown-linux-gnu --manifest-path crates/${{ inputs.crate }}/Cargo.toml ${{ inputs.crate == 'display' && '--features=sdl2/bundled' || '' }}
+          cp crates/target/aarch64-unknown-linux-gnu/release/${{ inputs.crate }} ./${{ inputs.crate }}
+          aarch64-linux-gnu-strip -s ./${{ inputs.crate }}
         env:
           RUST_BACKTRACE: full
 
