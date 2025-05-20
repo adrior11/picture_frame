@@ -36,8 +36,7 @@ impl SharedSettings {
                 rotate_interval_secs: 10,
                 shuffle: false,
             };
-            let toml_str = toml::to_string_pretty(&default)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            let toml_str = toml::to_string_pretty(&default).map_err(io::Error::other)?;
             fs::write(&settings_path, toml_str)?;
             default
         };
@@ -73,8 +72,7 @@ impl SharedSettings {
 
         let settings_path = PathBuf::from(&self.file_path);
         let tmp = settings_path.with_extension("toml.tmp");
-        let s =
-            toml::to_string_pretty(&new).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let s = toml::to_string_pretty(&new).map_err(io::Error::other)?;
         fs::write(&tmp, s)?;
         fs::rename(&tmp, &settings_path)?;
 
