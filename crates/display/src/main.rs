@@ -8,8 +8,12 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use image::GenericImageView;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use exif::{In, Reader as ExifReader, Tag};
+use image::{GenericImageView, imageops};
+use notify::{
+    RecommendedWatcher, RecursiveMode, Watcher,
+    event::{CreateKind, EventKind, ModifyKind, RemoveKind},
+};
 use rand::seq::SliceRandom;
 use sdl2::{
     event::Event,
@@ -22,8 +26,6 @@ use tokio::{
     time::Instant,
 };
 use tracing_subscriber::EnvFilter;
-use exif::{In, Tag, Reader as ExifReader};
-use image::imageops;
 
 use libs::{
     frame_settings::{FrameSettings, SharedSettings},
@@ -71,23 +73,27 @@ fn show_image(
         })
         .unwrap_or(1);
 
-    let mut dyn_img = image::load_from_memory(&img_bytes).with_context(|| format!("loading {img_path:?}"))?;
+    let mut dyn_img =
+        image::load_from_memory(&img_bytes).with_context(|| format!("loading {img_path:?}"))?;
 
     // apply EXIF orientation
     dyn_img = match exif_orientation {
         2 => image::DynamicImage::ImageRgba8(imageops::flip_horizontal(&dyn_img)),
         3 => image::DynamicImage::ImageRgba8(imageops::rotate180(&dyn_img)),
         4 => image::DynamicImage::ImageRgba8(imageops::flip_vertical(&dyn_img)),
-        5 => image::DynamicImage::ImageRgba8(imageops::rotate90(&imageops::flip_horizontal(&dyn_img))),
+        5 => image::DynamicImage::ImageRgba8(imageops::rotate90(&imageops::flip_horizontal(
+            &dyn_img,
+        ))),
         6 => image::DynamicImage::ImageRgba8(imageops::rotate90(&dyn_img)),
-        7 => image::DynamicImage::ImageRgba8(imageops::rotate270(&imageops::flip_horizontal(&dyn_img))),
+        7 => image::DynamicImage::ImageRgba8(imageops::rotate270(&imageops::flip_horizontal(
+            &dyn_img,
+        ))),
         8 => image::DynamicImage::ImageRgba8(imageops::rotate270(&dyn_img)),
         _ => dyn_img,
     };
 
+    // resize if needed
     let (w, h) = dyn_img.dimensions();
-    
-    // scale down large images to fit within SDL's texture size limit
     let max_dimension = 2048;
     let scale = if w > max_dimension || h > max_dimension {
         let scale_w = max_dimension as f32 / w as f32;
@@ -96,16 +102,16 @@ fn show_image(
     } else {
         1.0
     };
-    
     let scaled_w = (w as f32 * scale) as u32;
     let scaled_h = (h as f32 * scale) as u32;
-    
-    let rgba = if scale < 1.0 {
-        dyn_img.resize(scaled_w, scaled_h, image::imageops::FilterType::Lanczos3).into_rgba8()
-    } else {
-        dyn_img.into_rgba8()
-    };
-    
+
+    if scale < 1.0 {
+        dyn_img = dyn_img.resize(scaled_w, scaled_h, image::imageops::FilterType::Lanczos3);
+    }
+
+    // convert to RGBA8 for SDL
+    let rgba = dyn_img.into_rgba8();
+
     let pitch = scaled_w as usize * 4; // bytes per row
 
     let mut tex = tex_creator
@@ -172,6 +178,7 @@ async fn main() -> Result<()> {
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
+    #[allow(unused_mut)]
     let mut window = video_subsystem
         .window("Picture Frame", 800, 480)
         .position_centered()
@@ -218,6 +225,14 @@ async fn main() -> Result<()> {
             // filesystem events
             Some(Ok(ev)) = watcher_rx.recv() => {
                 tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
+
+                let is_relevant = matches!(&ev.kind, EventKind::Modify(ModifyKind::Data(_)) |
+                       EventKind::Modify(ModifyKind::Name(_)) |
+                       EventKind::Create(CreateKind::File) |
+                       EventKind::Create(CreateKind::Folder) |
+                       EventKind::Remove(RemoveKind::File) |
+                       EventKind::Remove(RemoveKind::Folder));
+
                 let affects_settings = ev.paths.iter()
                     .any(|p| fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
 
@@ -236,7 +251,7 @@ async fn main() -> Result<()> {
                             tracing::warn!("TOML parse error");
                         }
                     }
-                } else {
+                } else if is_relevant {
                     images = scan_images(&data_dir);
                     tracing::debug!(count = images.len(), "image folder rescan");
                     if current.shuffle { images.shuffle(&mut rand::rng()); }
