@@ -265,6 +265,11 @@ async fn main() -> Result<()> {
                     tracing::debug!(count = images.len(), "image folder rescan");
                     if current.shuffle { images.shuffle(&mut rand::rng()); }
                     index = 0;
+                    if images.is_empty() {
+                        canvas.set_draw_color(Color::BLACK);
+                        canvas.clear();
+                        canvas.present();
+                    }
                 }
             }
 
@@ -285,6 +290,10 @@ async fn main() -> Result<()> {
                     if current.rotate_enabled {
                         index = (index + 1) % images.len();
                     }
+                } else {
+                    canvas.set_draw_color(Color::BLACK);
+                    canvas.clear();
+                    canvas.present();
                 }
                 next_switch = Instant::now() + Duration::from_secs(current.rotate_interval_secs);
                 tracing::debug!(
