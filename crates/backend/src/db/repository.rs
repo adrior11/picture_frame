@@ -105,7 +105,7 @@ impl Repository {
         .await?
     }
 
-    /// Returns the filename *and* deletes the DB row in one round-trip.
+    /// Returns the filename and deletes the DB row in one round-trip.
     pub async fn delete_picture_and_return_filename(
         &self,
         id: &str,
@@ -164,7 +164,7 @@ impl Repository {
         task::spawn_blocking(move || {
             let conn = pool.get()?;
 
-            // tiny table: fetch **all** hashes and compare locally
+            // tiny table: fetch all hashes and compare locally
             let mut stmt = conn.prepare("SELECT id, token_hash, scope FROM api_keys")?;
             let rows = stmt.query_map([], |r| {
                 Ok((

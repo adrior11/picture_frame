@@ -87,7 +87,7 @@ async fn upload_picture(
         })?;
     }
     let path = data_dir.join(&filename);
-    tracing::debug!("📥 saving {}", path.display());
+    tracing::debug!("saving {}", path.display());
 
     let mut dest = tokio::fs::File::create(&path).await.map_err(|e| {
         tracing::error!("cannot open {path:?}: {e}");
@@ -142,7 +142,7 @@ async fn delete_picture(
         }
         Err(e) => {
             tracing::error!("failed to delete {path:?}: {e}");
-            // DB row is already gone → still return 204
+            // DB row is already gone; still return 204
         }
     }
 

@@ -62,7 +62,6 @@ fn show_image(
     tex_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
     img_path: &Path,
 ) -> Result<()> {
-    // read image bytes for EXIF
     let img_bytes = std::fs::read(img_path)?;
     let exif_orientation = ExifReader::new()
         .read_from_container(&mut std::io::Cursor::new(&img_bytes))
@@ -117,8 +116,6 @@ fn show_image(
     let mut tex = tex_creator
         .create_texture_streaming(PixelFormatEnum::RGBA32, scaled_w, scaled_h)
         .context("create texture")?;
-
-    // copy the whole buffer in one call
     tex.update(None, &rgba, pitch).unwrap();
 
     // scale to window while preserving aspect-ratio
@@ -179,7 +176,6 @@ async fn main() -> Result<()> {
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
-    #[allow(unused_mut)]
     let mut window = video_subsystem
         .window("Picture Frame", 800, 480)
         .position_centered()
@@ -198,7 +194,6 @@ async fn main() -> Result<()> {
         .unwrap();
     let tex_creator = canvas.texture_creator();
 
-    // present once so something is visible immediately
     canvas.set_draw_color(Color::BLACK);
     canvas.clear();
     canvas.present();
@@ -212,7 +207,6 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = shutdown.notified() => break,
 
-            // settings updated through watch channel
             _ = rx.changed() => {
                 current = rx.borrow().clone();
                 tracing::debug!(?current, "settings updated via channel");
@@ -223,7 +217,6 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // filesystem events
             Some(Ok(ev)) = watcher_rx.recv() => {
                 tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
 
@@ -273,7 +266,6 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // time to show the next slide
             _ = tokio::time::sleep_until(next_switch), if current.display_enabled => {
                 if !images.is_empty() {
                     let img = &images[index % images.len()];
@@ -314,7 +306,6 @@ async fn main() -> Result<()> {
             }
         }
 
-        // screen blanking when display disabled
         if !current.display_enabled {
             canvas.set_draw_color(Color::BLACK);
             canvas.clear();

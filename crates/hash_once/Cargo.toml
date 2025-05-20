@@ -3,6 +3,7 @@ name = "hash_once"
 version = "0.1.0"
 edition = "2021"
 authors = ["Adrian Schneider <adrian.schneider11@icloud.com>"]
+repository = "https://github.com/adrior11/picture_frame"
 license = "MIT"
 
 [[bin]]
