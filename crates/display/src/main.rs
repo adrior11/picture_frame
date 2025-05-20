@@ -183,11 +183,11 @@ async fn main() -> Result<()> {
     let mut window = video_subsystem
         .window("Picture Frame", 800, 480)
         .position_centered()
-        // .fullscreen_desktop()
+        .fullscreen_desktop()
         .resizable()
         .build()
         .unwrap();
-    // window.set_bordered(false);
+    window.set_bordered(false);
 
     let mut event_pump = sdl_context.event_pump().unwrap();
     let mut canvas = window
