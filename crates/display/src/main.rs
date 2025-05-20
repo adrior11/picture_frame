@@ -141,7 +141,7 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("LOG_LEVEL").add_directive("display=debug".parse()?))
+        .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
         .with_thread_ids(true)
         .init();
 
@@ -172,7 +172,8 @@ async fn main() -> Result<()> {
                 .with_compare_contents(true),
         )?;
         w.watch(&data_dir, RecursiveMode::NonRecursive)?;
-        w.watch(&settings_path, RecursiveMode::NonRecursive)?;
+        let settings_dir = settings_path.parent().unwrap();
+        w.watch(settings_dir, RecursiveMode::NonRecursive)?;
         (w, rx)
     };
 
@@ -234,7 +235,13 @@ async fn main() -> Result<()> {
                        EventKind::Remove(RemoveKind::Folder));
 
                 let affects_settings = ev.paths.iter()
-                    .any(|p| fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
+                    .any(|p| {
+                        let canon = fs::canonicalize(p).ok();
+                        canon.as_ref() == Some(&settings_path)
+                            || p == &settings_path
+                    });
+
+                tracing::debug!(affects_settings, settings_path=?settings_path, "event affects settings?");
 
                 if affects_settings {
                     if let Ok(toml) = fs::read_to_string(&settings_path) {
@@ -250,6 +257,8 @@ async fn main() -> Result<()> {
                         } else {
                             tracing::warn!("TOML parse error");
                         }
+                    } else {
+                        tracing::warn!("Could not read settings file after event");
                     }
                 } else if is_relevant {
                     images = scan_images(&data_dir);
