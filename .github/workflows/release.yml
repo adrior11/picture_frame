@@ -20,6 +20,9 @@ on:
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   release:
     name: Release ${{ inputs.crate }} – ${{ matrix.platform }}
