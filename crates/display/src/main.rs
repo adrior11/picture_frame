@@ -70,7 +70,7 @@ fn show_image(
     // copy the whole buffer in one call
     tex.update(None, &rgba, pitch).unwrap();
 
-    // scale to window  while preserving aspect-ratio
+    // scale to window while preserving aspect-ratio
     let (win_w, win_h) = canvas.output_size().unwrap();
     let scale = (win_w as f32 / w as f32).min(win_h as f32 / h as f32);
     let dst = Rect::from_center(
@@ -85,16 +85,17 @@ fn show_image(
     Ok(())
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("LOG_LEVEL"))
+        .with_env_filter(EnvFilter::from_env("LOG_LEVEL").add_directive("display=info".parse()?))
+        .with_thread_ids(true)
         .init();
 
     let settings = SharedSettings::load(&CONFIG.backend_frame_settings_file)?;
-    let settings_path = std::fs::canonicalize(&CONFIG.backend_frame_settings_file)
+    let settings_path = fs::canonicalize(&CONFIG.backend_frame_settings_file)
         .context("canonicalising BACKEND_FRAME_SETTINGS_FILE")?;
 
     let mut rx: watch::Receiver<FrameSettings> = settings.subscribe();
@@ -129,24 +130,36 @@ async fn main() -> Result<()> {
     let mut window = video_subsystem
         .window("Picture Frame", 800, 480)
         .position_centered()
-        .fullscreen_desktop()
+        // .fullscreen_desktop()
+        .resizable()
         .build()
         .unwrap();
-    window.set_bordered(false);
+    // window.set_bordered(false);
 
     let mut event_pump = sdl_context.event_pump().unwrap();
-    let mut canvas = window.into_canvas().present_vsync().build().unwrap();
+    let mut canvas = window
+        .into_canvas()
+        .accelerated()
+        .present_vsync()
+        .build()
+        .unwrap();
     let tex_creator = canvas.texture_creator();
 
-    let mut next_switch = Instant::now();
+    // present once so something is visible immediately
+    canvas.set_draw_color(Color::BLACK);
+    canvas.clear();
+    canvas.present();
 
     let shutdown = Arc::new(Notify::new());
     tokio::spawn(util::listen_for_shutdown(shutdown.clone()));
 
+    let mut next_switch = Instant::now();
+
     loop {
         tokio::select! {
-            _ = shutdown.notified() => return Ok(()),
+            _ = shutdown.notified() => break,
 
+            // settings updated through watch channel
             _ = rx.changed() => {
                 current = rx.borrow().clone();
                 tracing::debug!(?current, "settings updated via channel");
@@ -157,9 +170,12 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // filesystem events
             Some(Ok(ev)) = watcher_rx.recv() => {
                 tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
-                let affects_settings = ev.paths.iter().any(|p| std::fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
+                let affects_settings = ev.paths.iter()
+                    .any(|p| fs::canonicalize(p).ok().as_ref() == Some(&settings_path));
+
                 if affects_settings {
                     if let Ok(toml) = fs::read_to_string(&settings_path) {
                         if let Ok(new) = toml::from_str::<FrameSettings>(&toml) {
@@ -183,6 +199,7 @@ async fn main() -> Result<()> {
                 }
             }
 
+            // time to show the next slide
             _ = tokio::time::sleep_until(next_switch), if current.display_enabled => {
                 if !images.is_empty() {
                     let img = &images[index % images.len()];
@@ -199,8 +216,8 @@ async fn main() -> Result<()> {
 
         for event in event_pump.poll_iter() {
             match event {
-                Event::Quit { .. } => return Ok(()),
-                Event::KeyDown {
+                Event::Quit { .. }
+                | Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => return Ok(()),
@@ -208,11 +225,14 @@ async fn main() -> Result<()> {
             }
         }
 
+        // screen blanking when display disabled
         if !current.display_enabled {
             canvas.set_draw_color(Color::BLACK);
             canvas.clear();
             canvas.present();
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
+
+    Ok(())
 }
