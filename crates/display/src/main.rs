@@ -60,11 +60,30 @@ fn show_image(
 ) -> Result<()> {
     let dyn_img = image::open(img_path).with_context(|| format!("loading {img_path:?}"))?;
     let (w, h) = dyn_img.dimensions();
-    let rgba = dyn_img.into_rgba8();
-    let pitch = w as usize * 4; // bytes per row
+    
+    // scale down large images to fit within SDL's texture size limit
+    let max_dimension = 2048;
+    let scale = if w > max_dimension || h > max_dimension {
+        let scale_w = max_dimension as f32 / w as f32;
+        let scale_h = max_dimension as f32 / h as f32;
+        scale_w.min(scale_h)
+    } else {
+        1.0
+    };
+    
+    let scaled_w = (w as f32 * scale) as u32;
+    let scaled_h = (h as f32 * scale) as u32;
+    
+    let rgba = if scale < 1.0 {
+        dyn_img.resize(scaled_w, scaled_h, image::imageops::FilterType::Lanczos3).into_rgba8()
+    } else {
+        dyn_img.into_rgba8()
+    };
+    
+    let pitch = scaled_w as usize * 4; // bytes per row
 
     let mut tex = tex_creator
-        .create_texture_streaming(PixelFormatEnum::RGBA32, w, h)
+        .create_texture_streaming(PixelFormatEnum::RGBA32, scaled_w, scaled_h)
         .context("create texture")?;
 
     // copy the whole buffer in one call
@@ -72,11 +91,11 @@ fn show_image(
 
     // scale to window while preserving aspect-ratio
     let (win_w, win_h) = canvas.output_size().unwrap();
-    let scale = (win_w as f32 / w as f32).min(win_h as f32 / h as f32);
+    let scale = (win_w as f32 / scaled_w as f32).min(win_h as f32 / scaled_h as f32);
     let dst = Rect::from_center(
         (win_w as i32 / 2, win_h as i32 / 2),
-        (w as f32 * scale) as u32,
-        (h as f32 * scale) as u32,
+        (scaled_w as f32 * scale) as u32,
+        (scaled_h as f32 * scale) as u32,
     );
 
     canvas.clear();
@@ -90,7 +109,7 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
 
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_env("LOG_LEVEL").add_directive("display=info".parse()?))
+        .with_env_filter(EnvFilter::from_env("LOG_LEVEL").add_directive("display=debug".parse()?))
         .with_thread_ids(true)
         .init();
 
@@ -203,6 +222,13 @@ async fn main() -> Result<()> {
             _ = tokio::time::sleep_until(next_switch), if current.display_enabled => {
                 if !images.is_empty() {
                     let img = &images[index % images.len()];
+                    tracing::debug!(
+                        index = index,
+                        total = images.len(),
+                        rotate_enabled = current.rotate_enabled,
+                        interval = current.rotate_interval_secs,
+                        "showing next image"
+                    );
                     if let Err(e) = show_image(&mut canvas, &tex_creator, img) {
                         tracing::error!("display error: {e:#}");
                     }
@@ -211,6 +237,10 @@ async fn main() -> Result<()> {
                     }
                 }
                 next_switch = Instant::now() + Duration::from_secs(current.rotate_interval_secs);
+                tracing::debug!(
+                    next_switch = ?next_switch,
+                    "scheduled next switch"
+                );
             }
         }
 
