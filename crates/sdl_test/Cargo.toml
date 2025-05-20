@@ -1,0 +1,11 @@
+[package]
+name = "sdl_test"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "sdl_test"
+path = "src/main.rs"
+
+[dependencies]
+sdl2 = { version = "0.37.0", default-features = false }

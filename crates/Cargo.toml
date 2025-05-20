@@ -5,4 +5,5 @@ members = [
     "display",
     "hash_once",
     "libs",
+    "sdl_test",
 ]
