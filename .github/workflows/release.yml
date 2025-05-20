@@ -15,7 +15,6 @@ on:
           - backend
           - display
           - hash_once
-          - sdl_test
 
 permissions:
   contents: write
@@ -40,20 +39,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Cache apt dependencies
-        uses: actions/cache@v4
-        with:
-          path: /var/lib/apt/lists
-          key: ${{ runner.os }}-apt-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-apt-
-
       - name: Install cross-compilation tools
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Install SDL2 dependencies
-        if: inputs.crate == 'sdl_test' || inputs.crate == 'display'
+        if: inputs.crate == 'display'
         run: |
           sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu `lsb_release -sc` main universe restricted multiverse"
           sudo apt-get update -y -qq
@@ -80,24 +72,16 @@ jobs:
             wayland-protocols \
             x11proto-dev
 
-      - name: Install Rust
-        uses: actions-rs/toolchain@v1
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "stable"
+          toolchain: stable
           target: aarch64-unknown-linux-gnu
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          save-always: true
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          workspaces: "crates -> crates/target"
 
       - name: Build ${{ inputs.crate }}
         run: |
@@ -108,7 +92,7 @@ jobs:
           export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
           export RUSTFLAGS="-C target-cpu=generic -C link-arg=-Wl,--no-as-needed"
           cargo build --locked --release --target aarch64-unknown-linux-gnu --manifest-path crates/${{ inputs.crate }}/Cargo.toml \
-            ${{ (inputs.crate == 'sdl_test' || inputs.crate == 'display') && '--features=sdl2/bundled' || '' }}
+            ${{ inputs.crate == 'display' && '--features=sdl2/bundled' || '' }}
           cp crates/target/aarch64-unknown-linux-gnu/release/${{ inputs.crate }} ./${{ inputs.crate }}
           aarch64-linux-gnu-strip -s ./${{ inputs.crate }}
         env:
@@ -127,4 +111,4 @@ jobs:
         with:
           files: ./${{ inputs.crate }}
           tag_name: v${{ inputs.version }}
-          generate_release_notes: false
+          generate_release_notes: true
