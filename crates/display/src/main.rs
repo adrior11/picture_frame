@@ -22,6 +22,8 @@ use tokio::{
     time::Instant,
 };
 use tracing_subscriber::EnvFilter;
+use exif::{In, Tag, Reader as ExifReader};
+use image::imageops;
 
 use libs::{
     frame_settings::{FrameSettings, SharedSettings},
@@ -58,7 +60,31 @@ fn show_image(
     tex_creator: &sdl2::render::TextureCreator<sdl2::video::WindowContext>,
     img_path: &Path,
 ) -> Result<()> {
-    let dyn_img = image::open(img_path).with_context(|| format!("loading {img_path:?}"))?;
+    // read image bytes for EXIF
+    let img_bytes = std::fs::read(img_path)?;
+    let exif_orientation = ExifReader::new()
+        .read_from_container(&mut std::io::Cursor::new(&img_bytes))
+        .ok()
+        .and_then(|exif| {
+            exif.get_field(Tag::Orientation, In::PRIMARY)
+                .and_then(|f| f.value.get_uint(0))
+        })
+        .unwrap_or(1);
+
+    let mut dyn_img = image::load_from_memory(&img_bytes).with_context(|| format!("loading {img_path:?}"))?;
+
+    // apply EXIF orientation
+    dyn_img = match exif_orientation {
+        2 => image::DynamicImage::ImageRgba8(imageops::flip_horizontal(&dyn_img)),
+        3 => image::DynamicImage::ImageRgba8(imageops::rotate180(&dyn_img)),
+        4 => image::DynamicImage::ImageRgba8(imageops::flip_vertical(&dyn_img)),
+        5 => image::DynamicImage::ImageRgba8(imageops::rotate90(&imageops::flip_horizontal(&dyn_img))),
+        6 => image::DynamicImage::ImageRgba8(imageops::rotate90(&dyn_img)),
+        7 => image::DynamicImage::ImageRgba8(imageops::rotate270(&imageops::flip_horizontal(&dyn_img))),
+        8 => image::DynamicImage::ImageRgba8(imageops::rotate270(&dyn_img)),
+        _ => dyn_img,
+    };
+
     let (w, h) = dyn_img.dimensions();
     
     // scale down large images to fit within SDL's texture size limit
