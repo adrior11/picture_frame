@@ -7,14 +7,6 @@ on:
         description: 'Release version (e.g., 1.0.0)'
         required: true
         type: string
-      crate:
-        description: 'Crate to release'
-        required: true
-        type: choice
-        options:
-          - backend
-          - display
-          - hash_once
 
 permissions:
   contents: write
@@ -24,13 +16,14 @@ env:
 
 jobs:
   release:
-    name: Release ${{ inputs.crate }} – ${{ matrix.platform }}
+    name: Release ${{ matrix.crate }} – ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
 
     strategy:
       fail-fast: false
       matrix:
         platform: [Linux-aarch64]
+        crate: [backend, display, hash_once]
         include:
           - platform: Linux-aarch64
             runs-on: ubuntu-22.04
@@ -45,7 +38,7 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
       - name: Install SDL2 dependencies
-        if: inputs.crate == 'display'
+        if: matrix.crate == 'display'
         run: |
           sudo add-apt-repository -y "deb http://archive.ubuntu.com/ubuntu `lsb_release -sc` main universe restricted multiverse"
           sudo apt-get update -y -qq
@@ -83,7 +76,7 @@ jobs:
         with:
           workspaces: "crates -> crates/target"
 
-      - name: Build ${{ inputs.crate }}
+      - name: Build ${{ matrix.crate }}
         run: |
           export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
           export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
@@ -91,24 +84,24 @@ jobs:
           export PKG_CONFIG_ALLOW_CROSS=1
           export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig
           export RUSTFLAGS="-C target-cpu=generic -C link-arg=-Wl,--no-as-needed"
-          cargo build --locked --release --target aarch64-unknown-linux-gnu --manifest-path crates/${{ inputs.crate }}/Cargo.toml \
-            ${{ inputs.crate == 'display' && '--features=sdl2/bundled' || '' }}
-          cp crates/target/aarch64-unknown-linux-gnu/release/${{ inputs.crate }} ./${{ inputs.crate }}
-          aarch64-linux-gnu-strip -s ./${{ inputs.crate }}
+          cargo build --locked --release --target aarch64-unknown-linux-gnu --manifest-path crates/${{ matrix.crate }}/Cargo.toml \
+            ${{ matrix.crate == 'display' && '--features=sdl2/bundled' || '' }}
+          cp crates/target/aarch64-unknown-linux-gnu/release/${{ matrix.crate }} ./${{ matrix.crate }}
+          aarch64-linux-gnu-strip -s ./${{ matrix.crate }}
         env:
           RUST_BACKTRACE: full
 
       - name: Verify binary architecture
         run: |
-          file ./${{ inputs.crate }}
-          if ! file ./${{ inputs.crate }} | grep -q "ARM aarch64"; then
+          file ./${{ matrix.crate }}
+          if ! file ./${{ matrix.crate }} | grep -q "ARM aarch64"; then
             echo "Error: Binary is not built for aarch64!"
             exit 1
           fi
 
-      - name: Create Release for ${{ inputs.crate }}
+      - name: Create Release for ${{ matrix.crate }}
         uses: softprops/action-gh-release@v1
         with:
-          files: ./${{ inputs.crate }}
+          files: ./${{ matrix.crate }}
           tag_name: v${{ inputs.version }}
           generate_release_notes: true
