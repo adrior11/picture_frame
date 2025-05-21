@@ -64,8 +64,16 @@ async fn main() -> Result<()> {
     let shutdown_notify = Arc::new(Notify::new());
     tokio::spawn(util::listen_for_shutdown(shutdown_notify.clone()));
 
-    let api_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.backend_port)).await?;
-    let metrics_listener = TcpListener::bind(format!("0.0.0.0:{}", CONFIG.prometheus_port)).await?;
+    let api_listener = TcpListener::bind(format!(
+        "{}:{}",
+        CONFIG.backend_ipv4_address, CONFIG.backend_port
+    ))
+    .await?;
+    let metrics_listener = TcpListener::bind(format!(
+        "{}:{}",
+        CONFIG.prometheus_ipv4_address, CONFIG.prometheus_port
+    ))
+    .await?;
 
     tracing::info!("⇢ API listening on: http://{}", api_listener.local_addr()?);
     tracing::info!(

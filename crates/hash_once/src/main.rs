@@ -5,7 +5,6 @@ use argon2::{
     Argon2,
 };
 
-// FIX: remove rouille dependency
 fn main() {
     // usage: cargo run --bin hash_once <SECRET>
     let secret = env::args().nth(1).expect("give the secret as CLI arg");
