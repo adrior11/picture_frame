@@ -176,6 +176,8 @@ async fn main() -> Result<()> {
 
     let sdl_context = sdl2::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
+    sdl_context.mouse().show_cursor(false);
+
     let mut window = video_subsystem
         .window("Picture Frame", 800, 480)
         .position_centered()
