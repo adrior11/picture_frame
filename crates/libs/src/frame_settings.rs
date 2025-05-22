@@ -1,23 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, io, path::PathBuf, sync::Arc};
-use tokio::sync::{watch, RwLock};
+use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FrameSettings {
     pub display_enabled: bool,
-    pub rotate_enabled: bool,
     pub rotate_interval_secs: u64,
     pub shuffle: bool,
-}
-
-pub struct SettingsStore {
-    pub inner: RwLock<FrameSettings>,
-    pub tx: watch::Sender<FrameSettings>,
+    pub pinned_image: Option<String>,
 }
 
 #[derive(Clone)]
 pub struct SharedSettings {
-    pub settings_store: Arc<SettingsStore>,
+    pub settings_store: Arc<RwLock<FrameSettings>>,
     pub file_path: String,
 }
 
@@ -32,33 +27,24 @@ impl SharedSettings {
         } else {
             let default = FrameSettings {
                 display_enabled: true,
-                rotate_enabled: true,
                 rotate_interval_secs: 10,
                 shuffle: false,
+                pinned_image: None,
             };
             let toml_str = toml::to_string_pretty(&default).map_err(io::Error::other)?;
             fs::write(&settings_path, toml_str)?;
             default
         };
 
-        let (tx, _) = watch::channel(initial.clone());
         Ok(SharedSettings {
-            settings_store: Arc::new(SettingsStore {
-                inner: RwLock::new(initial),
-                tx,
-            }),
+            settings_store: Arc::new(RwLock::new(initial)),
             file_path: file_path.to_string(),
         })
     }
 
     /// Get a snapshot of the current settings.
     pub async fn get(&self) -> FrameSettings {
-        self.settings_store.inner.read().await.clone()
-    }
-
-    /// Subscribe to changes in settings. (Embedded)
-    pub fn subscribe(&self) -> watch::Receiver<FrameSettings> {
-        self.settings_store.tx.subscribe()
+        self.settings_store.read().await.clone()
     }
 
     /// Mutate in memory and write back to disk atomically.
@@ -66,7 +52,7 @@ impl SharedSettings {
     where
         F: FnOnce(&mut FrameSettings),
     {
-        let mut guard = self.settings_store.inner.write().await;
+        let mut guard = self.settings_store.write().await;
         mutator(&mut guard);
         let new = guard.clone();
 
@@ -76,7 +62,6 @@ impl SharedSettings {
         fs::write(&tmp, s)?;
         fs::rename(&tmp, &settings_path)?;
 
-        let _ = self.settings_store.tx.send(new.clone());
         Ok(new)
     }
 }

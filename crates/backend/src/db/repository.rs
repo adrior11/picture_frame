@@ -164,7 +164,6 @@ impl Repository {
         task::spawn_blocking(move || {
             let conn = pool.get()?;
 
-            // tiny table: fetch all hashes and compare locally
             let mut stmt = conn.prepare("SELECT id, token_hash, scope FROM api_keys")?;
             let rows = stmt.query_map([], |r| {
                 Ok((

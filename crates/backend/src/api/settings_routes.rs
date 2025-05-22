@@ -8,7 +8,6 @@ use crate::common::AppState;
 #[derive(Deserialize)]
 pub struct PartialSettings {
     pub display_enabled: Option<bool>,
-    pub rotate_enabled: Option<bool>,
     pub rotate_interval_secs: Option<u64>,
     pub shuffle: Option<bool>,
 }
@@ -30,9 +29,6 @@ async fn patch_settings(
         .update(|s| {
             if let Some(v) = chg.display_enabled {
                 s.display_enabled = v;
-            }
-            if let Some(v) = chg.rotate_enabled {
-                s.rotate_enabled = v;
             }
             if let Some(v) = chg.rotate_interval_secs {
                 s.rotate_interval_secs = v;

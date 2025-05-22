@@ -21,10 +21,7 @@ use sdl2::{
     pixels::{Color, PixelFormatEnum},
     rect::Rect,
 };
-use tokio::{
-    sync::{Notify, watch},
-    time::Instant,
-};
+use tokio::{sync::Notify, time::Instant};
 use tracing_subscriber::EnvFilter;
 
 use libs::{
@@ -54,6 +51,16 @@ fn scan_images(dir: &Path) -> Vec<PathBuf> {
         .collect();
     files.sort();
     files
+}
+
+/// Find the index of a pinned image in the list, if it exists.
+fn find_pinned_image_index(images: &[PathBuf], pinned_filename: &str) -> Option<usize> {
+    images.iter().position(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n == pinned_filename)
+            .unwrap_or(false)
+    })
 }
 
 /// Load an image and blit it full‑screen (keep aspect).
@@ -142,21 +149,24 @@ async fn main() -> Result<()> {
         .with_thread_ids(true)
         .init();
 
-    let settings = SharedSettings::load(&CONFIG.backend_frame_settings_file)?;
-    let settings_path = fs::canonicalize(&CONFIG.backend_frame_settings_file)
-        .context("canonicalising BACKEND_FRAME_SETTINGS_FILE")?;
-
-    let mut rx: watch::Receiver<FrameSettings> = settings.subscribe();
-    let mut current = rx.borrow().clone();
-    tracing::info!(?current, "initial settings");
+    let shared_settings = SharedSettings::load(&CONFIG.backend_frame_settings_file)?;
+    let settings_path = PathBuf::from(&CONFIG.backend_frame_settings_file);
+    let mut current_settings = shared_settings.get().await.clone();
+    tracing::info!(?current_settings, "initial settings");
 
     let data_dir = PathBuf::from(&CONFIG.backend_data_dir);
     let mut images = scan_images(&data_dir);
-    if current.shuffle {
+    tracing::info!(count = images.len(), "initial image scan");
+
+    if current_settings.shuffle {
         images.shuffle(&mut rand::rng());
     }
-    let mut index: usize = 0;
-    tracing::info!(count = images.len(), "initial image scan");
+
+    let mut index: usize = if let Some(pinned) = &current_settings.pinned_image {
+        find_pinned_image_index(&images, pinned).unwrap_or(0)
+    } else {
+        0
+    };
 
     let (_watcher, mut watcher_rx) = {
         let (tx, rx) = tokio::sync::mpsc::channel::<notify::Result<notify::Event>>(8);
@@ -169,8 +179,7 @@ async fn main() -> Result<()> {
                 .with_compare_contents(true),
         )?;
         w.watch(&data_dir, RecursiveMode::NonRecursive)?;
-        let settings_dir = settings_path.parent().unwrap();
-        w.watch(settings_dir, RecursiveMode::NonRecursive)?;
+        w.watch(settings_path.parent().unwrap(), RecursiveMode::NonRecursive)?;
         (w, rx)
     };
 
@@ -209,16 +218,6 @@ async fn main() -> Result<()> {
         tokio::select! {
             _ = shutdown.notified() => break,
 
-            _ = rx.changed() => {
-                current = rx.borrow().clone();
-                tracing::debug!(?current, "settings updated via channel");
-                next_switch = Instant::now();
-                if current.shuffle {
-                    images.shuffle(&mut rand::rng());
-                    index = 0;
-                }
-            }
-
             Some(Ok(ev)) = watcher_rx.recv() => {
                 tracing::debug!(?ev.paths, kind=?ev.kind, "fs event");
 
@@ -236,60 +235,81 @@ async fn main() -> Result<()> {
                             || p == &settings_path
                     });
 
-                tracing::debug!(affects_settings, settings_path=?settings_path, "event affects settings?");
+                let in_data_dir = ev.paths.iter().any(|p| p.starts_with(&data_dir));
 
-                if affects_settings {
-                    if let Ok(toml) = fs::read_to_string(&settings_path) {
-                        if let Ok(new) = toml::from_str::<FrameSettings>(&toml) {
-                            // broadcast only if value changed
-                            if new != *settings.settings_store.inner.read().await {
-                                tracing::debug!(?new, "reloaded settings.toml");
-                                *settings.settings_store.inner.write().await = new.clone();
-                                let _ = settings.settings_store.tx.send(new.clone());
-                                current = new;
-                                next_switch = Instant::now();
+                if is_relevant {
+                    if affects_settings {
+                        if let Ok(toml) = fs::read_to_string(&settings_path) {
+                            if let Ok(new_settings) = toml::from_str::<FrameSettings>(&toml) {
+                                if new_settings != *shared_settings.settings_store.read().await {
+                                    *shared_settings.settings_store.write().await = new_settings.clone();
+                                    current_settings = new_settings;
+                                    tracing::debug!(?current_settings, "reloaded settings.toml");
+                                    next_switch = Instant::now();
+                                }
+                            } else {
+                                tracing::error!("TOML parse error");
                             }
                         } else {
-                            tracing::warn!("TOML parse error");
+                            tracing::warn!("Could not read settings file after event");
                         }
-                    } else {
-                        tracing::warn!("Could not read settings file after event");
-                    }
-                } else if is_relevant {
-                    images = scan_images(&data_dir);
-                    tracing::debug!(count = images.len(), "image folder rescan");
-                    if current.shuffle { images.shuffle(&mut rand::rng()); }
-                    index = 0;
-                    if images.is_empty() {
-                        canvas.set_draw_color(Color::BLACK);
-                        canvas.clear();
-                        canvas.present();
+                    } else if in_data_dir {
+                        images = scan_images(&data_dir);
+                        tracing::debug!(count = images.len(), "image folder rescan");
+                        if current_settings.shuffle {
+                            images.shuffle(&mut rand::rng());
+                        };
+                        index = if let Some(pinned) = &current_settings.pinned_image {
+                            find_pinned_image_index(&images, pinned).unwrap_or(0)
+                        } else {
+                            0
+                        };
+                        if images.is_empty() {
+                            canvas.set_draw_color(Color::BLACK);
+                            canvas.clear();
+                            canvas.present();
+                        };
                     }
                 }
             }
 
-            _ = tokio::time::sleep_until(next_switch), if current.display_enabled => {
+            _ = tokio::time::sleep_until(next_switch), if current_settings.display_enabled => {
                 if !images.is_empty() {
-                    let img = &images[index % images.len()];
-                    tracing::debug!(
-                        index = index,
-                        total = images.len(),
-                        rotate_enabled = current.rotate_enabled,
-                        interval = current.rotate_interval_secs,
-                        "showing next image"
-                    );
-                    if let Err(e) = show_image(&mut canvas, &tex_creator, img) {
-                        tracing::error!("display error: {e:#}");
-                    }
-                    if current.rotate_enabled {
+                    if let Some(pinned) = &current_settings.pinned_image {
+                        if let Some(pinned_index) = find_pinned_image_index(&images, pinned) {
+                            index = pinned_index;
+                            tracing::debug!(
+                                index = index,
+                                total = images.len(),
+                                "showing pinned image"
+                            );
+                            if let Err(e) = show_image(&mut canvas, &tex_creator, &images[index]) {
+                                tracing::error!("display error: {e:#}");
+                            }
+                        } else {
+                            tracing::error!(
+                                "pinned image {} not found in list",
+                                pinned
+                            );
+                        }
+                    } else {
                         index = (index + 1) % images.len();
+                        tracing::debug!(
+                            index = index,
+                            total = images.len(),
+                            interval = current_settings.rotate_interval_secs,
+                            "showing next image"
+                        );
+                        if let Err(e) = show_image(&mut canvas, &tex_creator, &images[index]) {
+                            tracing::error!("display error: {e:#}");
+                        }
                     }
                 } else {
                     canvas.set_draw_color(Color::BLACK);
                     canvas.clear();
                     canvas.present();
                 }
-                next_switch = Instant::now() + Duration::from_secs(current.rotate_interval_secs);
+                next_switch = Instant::now() + Duration::from_secs(current_settings.rotate_interval_secs);
                 tracing::debug!(
                     next_switch = ?next_switch,
                     "scheduled next switch"
@@ -308,7 +328,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        if !current.display_enabled {
+        if !current_settings.display_enabled {
             canvas.set_draw_color(Color::BLACK);
             canvas.clear();
             canvas.present();

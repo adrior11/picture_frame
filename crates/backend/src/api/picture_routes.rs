@@ -21,6 +21,10 @@ pub fn picture_routes() -> Router<AppState> {
             "/api/pictures",
             routing::get(list_pictures).post(upload_picture),
         )
+        .route(
+            "/api/pictures/{id}/pin",
+            routing::put(pin_picture).delete(unpin_picture),
+        )
         .route("/api/pictures/{id}", routing::delete(delete_picture))
 }
 
@@ -134,6 +138,17 @@ async fn delete_picture(
         return Err(StatusCode::NOT_FOUND);
     };
 
+    let settings = state.settings.get().await;
+    if settings.pinned_image.as_ref() == Some(&fname) {
+        state
+            .settings
+            .update(|s| {
+                s.pinned_image = None;
+            })
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+
     let path = std::path::Path::new(&CONFIG.backend_data_dir).join(&fname);
     match tokio::fs::remove_file(&path).await {
         Ok(_) => tracing::debug!("removed file {}", path.display()),
@@ -145,6 +160,67 @@ async fn delete_picture(
             // DB row is already gone; still return 204
         }
     }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn pin_picture(
+    ApiKey { scope, .. }: ApiKey,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if scope != "rw" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let picture = state
+        .repo
+        .get_picture(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    state
+        .settings
+        .update(|s| {
+            s.pinned_image = Some(picture.filename);
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn unpin_picture(
+    ApiKey { scope, .. }: ApiKey,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, StatusCode> {
+    if scope != "rw" {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let picture = state
+        .repo
+        .get_picture(&id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let settings = state.settings.get().await;
+    if settings.pinned_image.as_ref().is_none() {
+        return Ok(StatusCode::NO_CONTENT);
+    } else if settings.pinned_image.as_ref() != Some(&picture.filename) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    state
+        .settings
+        .update(|s| {
+            s.pinned_image = None;
+        })
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
