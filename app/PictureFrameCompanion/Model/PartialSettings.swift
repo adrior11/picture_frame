@@ -10,7 +10,6 @@ import Foundation
 /// For PATCH /api/settings
 struct PartialSettings: Codable {
     var display_enabled: Bool?
-    var rotate_enabled: Bool?
     var rotate_interval_secs: Int?
     var shuffle: Bool?
 }

@@ -58,6 +58,28 @@ final class ApiClient: ObservableObject {
         }
     }
 
+    /// PUT  /api/pictures/{id}/pin
+    func pin(id: String) async {
+        await run {
+            _ = try await request(
+                Empty.self,
+                method: "PUT",
+                path: "api/pictures/\(id)/pin")
+            await fetchSettings()
+        }
+    }
+
+    /// DELETE /api/pictures/{id}/pin
+    func unpin(id: String) async {
+        await run {
+            _ = try await request(
+                Empty.self,
+                method: "DELETE",
+                path: "api/pictures/\(id)/pin")
+            await fetchSettings()
+        }
+    }
+
     /// POST /api/pictures (multipart/form-data)
     func upload(data: Data, filename: String, mime: String) async {
         busy = true

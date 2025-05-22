@@ -39,22 +39,28 @@ struct ContentView: View {
 
     var body: some View {
         NavigationStack {
-            picturesList
-                .toolbar {
-                    toolbarLeadingItems
-                    toolbarTrailingItems
+            PicturesList(
+                pictures: api.pictures,
+                pinnedImage: api.settings?.pinned_image,
+                onTogglePin: togglePin,
+                onDelete: api.delete,
+                onRefresh: loadAll
+            )
+            .toolbar {
+                toolbarLeadingItems
+                toolbarTrailingItems
+            }
+            .task {
+                guard api.isConfigured else {
+                    return
                 }
-                .task {
-                    guard api.isConfigured else {
-                        return
-                    }
-                    await loadAll()
+                await loadAll()
+            }
+            .onChange(of: pickerItem) {
+                Task {
+                    await upload()
                 }
-                .onChange(of: pickerItem) {
-                    Task {
-                        await upload()
-                    }
-                }
+            }
         }
         .sheet(item: $activeSheet) { sheet in
             switch sheet {
@@ -81,24 +87,7 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Subviews
-
-    private var picturesList: some View {
-        List(api.pictures) { pic in
-            PictureRow(pic: pic) {
-                Task { await api.delete(id: pic.id) }
-            }
-        }
-        .overlay {
-            if api.pictures.isEmpty {
-                ContentUnavailableView("No Pictures", systemImage: "photo")
-            }
-        }
-        .navigationTitle("Picture Frame")
-        .refreshable {
-            await loadAll()
-        }
-    }
+    // MARK: - Toolbar
 
     private var toolbarLeadingItems: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarLeading) {
@@ -136,11 +125,9 @@ struct ContentView: View {
 
     private func loadAll() async {
         await api.fetchPictures()
-        // Only try the 2nd call if the first one reached.
-        guard api.reachable else { return }
-        await api.fetchSettings()
+        if api.reachable { await api.fetchSettings() }
     }
-    
+
     private func upload() async {
         guard let item = pickerItem else { return }
 
@@ -171,6 +158,14 @@ struct ContentView: View {
         api.update(url: newURL) { c.bearerToken }
     }
 
+    private func togglePin(_ pic: Picture) async {
+        if api.settings?.pinned_image == pic.filename {
+            await api.unpin(id: pic.id)
+        } else {
+            await api.pin(id: pic.id)
+        }
+    }
+
     // MARK: - Helpers
 
     private func existingConn() -> Connection {
@@ -184,9 +179,9 @@ struct ContentView: View {
         // fallback in case .settings is nil
         FrameSettings(
             display_enabled: true,
-            rotate_enabled: true,
             rotate_interval_secs: 10,
-            shuffle: false)
+            shuffle: false,
+            pinned_image: nil)
     }
 }
 
@@ -195,31 +190,6 @@ struct ContentView: View {
 private enum SheetType: Identifiable {
     case settings, connection
     var id: Int { hashValue }
-}
-
-private struct PictureRow: View {
-    let pic: Picture
-    let onDelete: () -> Void
-
-    var body: some View {
-        HStack {
-            Text(pic.filename).lineLimit(1)
-            Spacer()
-            Text(
-                Date(timeIntervalSince1970: TimeInterval(pic.added_at) / 1000),
-                format: .dateTime.year().month().day()
-            )
-            .foregroundStyle(.secondary)
-            .font(.footnote)
-        }
-        .swipeActions {
-            Button(role: .destructive) {
-                onDelete()
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-    }
 }
 
 #Preview {

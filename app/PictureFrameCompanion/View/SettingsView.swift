@@ -16,7 +16,6 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Toggle("Display Enabled", isOn: $settings.display_enabled)
-                Toggle("Rotate Enabled", isOn: $settings.rotate_enabled)
                 Stepper(
                     "Interval: \(settings.rotate_interval_secs)s",
                     value: $settings.rotate_interval_secs,
@@ -29,7 +28,6 @@ struct SettingsView: View {
                     Button("Save") {
                         let patch = PartialSettings(
                             display_enabled: settings.display_enabled,
-                            rotate_enabled: settings.rotate_enabled,
                             rotate_interval_secs: settings.rotate_interval_secs,
                             shuffle: settings.shuffle
                         )
