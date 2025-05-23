@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 import os
 
 @MainActor
@@ -164,7 +165,6 @@ final class ApiClient: ObservableObject {
         headers.forEach { req.setValue($0.value, forHTTPHeaderField: $0.key) }
         req.httpBody = body
 
-        //let (data, resp) = try await URLSession.shared.data(for: req)
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, http.statusCode < 300 else {
             throw URLError(.badServerResponse)
@@ -177,6 +177,7 @@ final class ApiClient: ObservableObject {
         do {
             try await op()
             reachable = true
+            notifyHaptic(.success)
         } catch {
             if let urlErr = error as? URLError {
                 reachable = false
@@ -190,6 +191,7 @@ final class ApiClient: ObservableObject {
                 self.error = errorText(error)
                 logger.error("API error: \(error.localizedDescription, privacy: .public)")
             }
+            notifyHaptic(.error)
         }
     }
 
@@ -209,4 +211,15 @@ final class ApiClient: ObservableObject {
     }
 
     private struct Empty: Decodable {}
+}
+
+// MARK: - Haptic Feedback
+
+@MainActor
+private func notifyHaptic(
+    _ kind: UINotificationFeedbackGenerator.FeedbackType
+) {
+    let generator = UINotificationFeedbackGenerator()
+    generator.prepare()
+    generator.notificationOccurred(kind)
 }

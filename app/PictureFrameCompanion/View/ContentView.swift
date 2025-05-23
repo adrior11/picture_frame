@@ -8,6 +8,7 @@
 import PhotosUI
 import SwiftData
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 import os
 
@@ -131,21 +132,42 @@ struct ContentView: View {
     private func upload() async {
         guard let item = pickerItem else { return }
 
-        guard let data = try? await item.loadTransferable(type: Data.self) else {
-            logger.warning("Could not load image data from picker item")
-            return
+        do {
+            guard let originalData = try await item.loadTransferable(type: Data.self) else {
+                logger.warning("Could not read image bytes")
+                pickerItem = nil
+                return
+            }
+
+            let isPNG = item.supportedContentTypes.contains(.png)
+
+            let (finalData, filename, mime): (Data, String, String) = {
+                if isPNG {
+                    let name = UUID().uuidString + ".png"
+                    return (originalData, name, "image/png")
+                } else {
+                    guard let uiImage = UIImage(data: originalData),
+                        let jpeg = uiImage.jpegData(compressionQuality: 0.90)
+                    else {
+                        logger.warning("Could not transcode to JPEG")
+                        return (Data(), "", "")
+                    }
+                    let name = UUID().uuidString + ".jpg"
+                    return (jpeg, name, "image/jpeg")
+                }
+            }()
+
+            guard !finalData.isEmpty else {
+                pickerItem = nil
+                return
+            }
+
+            await api.upload(data: finalData, filename: filename, mime: mime)
+
+        } catch {
+            logger.error("loadTransferable failed: \(error.localizedDescription, privacy: .public)")
         }
 
-        let (fileExt, mime): (String, String) = {
-            if item.supportedContentTypes.contains(.png) {
-                return ("png", "image/png")
-            } else {
-                return ("jpg", "image/jpeg")
-            }
-        }()
-
-        let filename = "\(UUID().uuidString).\(fileExt)"
-        await api.upload(data: data, filename: filename, mime: mime)
         pickerItem = nil
     }
 
